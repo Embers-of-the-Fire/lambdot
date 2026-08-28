@@ -1,0 +1,44 @@
+name: CI
+
+on:
+    push:
+        branches: [main]
+    pull_request:
+
+permissions:
+    contents: read
+
+concurrency:
+    group: ci-${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    check:
+        name: Format / Lint / Typecheck
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v7
+
+            # Drop-in replacement for actions/setup-node: installs nub and
+            # provisions the project's pinned Node (from .node-version).
+            - uses: nubjs/setup-nub@v0
+              with:
+                  cache-dependency-path: nub.lock
+
+            - name: Install dependencies
+              run: nub install --frozen-lockfile
+
+            - name: Check formatting
+              run: nub run fmt:check
+
+            - name: Lint
+              run: nub run lint
+
+            - name: Typecheck
+              run: |
+                  for project in packages/* examples/*; do
+                    echo "::group::tsc -p $project"
+                    npx tsc -p "$project"
+                    echo "::endgroup::"
+                  done
+              shell: bash
