@@ -1,21 +1,28 @@
 {
-  "name": "lambdot",
-  "version": "0.0.1",
-  "type": "module",
-  "packageManager": "nub@0.8.0",
-  "devEngines": {
-    "packageManager": {
-      "name": "nub",
-      "version": "^0.8.0",
-      "onFail": "ignore"
-    }
-  },
-  "scripts": {
-    "start": "nub index.ts"
-  },
-  "devDependencies": {
-    "@nubjs/types": ">=0.4.13 <=0.8.0",
-    "@types/node": "^26",
-    "typescript": "^7"
-  }
+    "name": "lambdot",
+    "version": "0.0.1",
+    "type": "module",
+    "scripts": {
+        "start": "nub index.ts",
+        "fmt": "oxfmt",
+        "fmt:check": "oxfmt --check",
+        "lint": "oxlint",
+        "lint:fix": "oxlint --fix"
+    },
+    "devDependencies": {
+        "@nubjs/types": ">=0.4.13 <=0.8.0",
+        "@types/node": "^26",
+        "oxfmt": "^0.65.0",
+        "oxlint": "^1.80.0",
+        "oxlint-tsgolint": "^7.0.2001",
+        "typescript": "^7"
+    },
+    "devEngines": {
+        "packageManager": {
+            "name": "nub",
+            "version": "^0.8.0",
+            "onFail": "ignore"
+        }
+    },
+    "packageManager": "nub@0.8.0"
 }
