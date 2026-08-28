@@ -27,6 +27,56 @@ importers:
         specifier: ^7
         version: 7.0.2
 
+  examples/counter-bot:
+    dependencies:
+      '@lambdot/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@lambdot/input-console':
+        specifier: workspace:*
+        version: link:../../packages/input-console
+      '@lambdot/output-console':
+        specifier: workspace:*
+        version: link:../../packages/output-console
+      '@lambdot/state-memory':
+        specifier: workspace:*
+        version: link:../../packages/state-memory
+
+  examples/echo-bot:
+    dependencies:
+      '@lambdot/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@lambdot/input-console':
+        specifier: workspace:*
+        version: link:../../packages/input-console
+      '@lambdot/output-console':
+        specifier: workspace:*
+        version: link:../../packages/output-console
+
+  packages/core: {}
+
+  packages/input-console:
+    dependencies:
+      '@lambdot/core':
+        specifier: workspace:*
+        version: link:../core
+      '@lambdot/output-console':
+        specifier: workspace:*
+        version: link:../output-console
+
+  packages/output-console:
+    dependencies:
+      '@lambdot/core':
+        specifier: workspace:*
+        version: link:../core
+
+  packages/state-memory:
+    dependencies:
+      '@lambdot/core':
+        specifier: workspace:*
+        version: link:../core
+
 packages:
 
   '@nubjs/types@0.7.5':

@@ -1,0 +1,15 @@
+{
+    "name": "@lambdot-example/counter-bot",
+    "version": "0.0.1",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "start": "nub index.ts"
+    },
+    "dependencies": {
+        "@lambdot/core": "workspace:*",
+        "@lambdot/input-console": "workspace:*",
+        "@lambdot/output-console": "workspace:*",
+        "@lambdot/state-memory": "workspace:*"
+    }
+}
