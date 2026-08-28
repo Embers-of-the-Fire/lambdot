@@ -82,6 +82,7 @@ against plugin state within an event handler is race-free.
 | `examples/echo-bot`       | —                         | echo bot and compile-time type tests            |
 | `examples/counter-bot`    | —                         | counting bot: the pluggable-state walkthrough   |
 | `examples/websocket-bot`  | —                         | websocket bot: the typed-capability walkthrough |
+| `examples/multi-echo-bot` | —                         | one echo feature serving console + websocket    |
 
 ## Scripts
 

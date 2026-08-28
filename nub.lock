@@ -54,6 +54,25 @@ importers:
         specifier: workspace:*
         version: link:../../packages/output-console
 
+  examples/multi-echo-bot:
+    dependencies:
+      '@lambdot/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@lambdot/input-console':
+        specifier: workspace:*
+        version: link:../../packages/input-console
+      '@lambdot/output-console':
+        specifier: workspace:*
+        version: link:../../packages/output-console
+      ws:
+        specifier: ^8.21.3
+        version: 8.21.3
+    devDependencies:
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
+
   examples/websocket-bot:
     dependencies:
       '@lambdot/core':
