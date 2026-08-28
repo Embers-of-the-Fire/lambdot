@@ -22,9 +22,9 @@ There is **no test runner and no test suite**. Verification is, in order:
 3. Per-project typecheck, because the root `tsconfig.json` has `"files": []`
    and checks nothing:
 
-   ```sh
-   for project in packages/* examples/*; do npx tsc -p "$project"; done
-   ```
+    ```sh
+    for project in packages/* examples/*; do npx tsc -p "$project"; done
+    ```
 
 This mirrors `.github/workflows/ci.yml`. Run all three before finishing.
 
@@ -49,7 +49,9 @@ Monorepo: `packages/*` (`@lambdot/*` — `core` kernel plus reference
 input/output/state plugins) and `examples/*` (`@lambdot-example/*`). Everything
 is a plugin composed via `createKernel().use(...)`; the generic fold means
 **registration order is enforced at compile time** — inputs/outputs must be
-registered before feature plugins that consume them.
+registered before feature plugins that consume them, and typed capabilities
+(`TProvides`/`TInjects`, folded as `TCaps`) before plugins that inject them.
+Untyped, string-only `inject` (e.g. `"state"`) stays runtime-gated only.
 
 `examples/echo-bot/type-test.ts` is a compile-time test suite: every
 `@ts-expect-error` line must remain a genuine error. Do not "fix" the flagged

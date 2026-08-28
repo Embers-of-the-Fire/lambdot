@@ -32,6 +32,9 @@ $ nub examples/echo-bot/index.ts     # the echo bot: type a line, get it echoed
   through any Standard Schema validator.
 - **`inject`, not boot order.** A plugin listing `inject: ["state"]` stays
   pending until something provides `state`, and unloads if it goes away.
+  Declaring the need as a typed capability (`TInjects`) additionally makes
+  registration order a compile-time concern and types the injected value on
+  the plugin's context (see `examples/websocket-bot`).
 - **The event bus is the only message-flow primitive.** `emit` / `parallel` /
   `serial` for observation, `waterfall` for middleware — authentication,
   logging, and filtering are ordinary waterfall listeners on `bot/ingress`.
@@ -43,9 +46,12 @@ $ nub examples/echo-bot/index.ts     # the echo bot: type a line, get it echoed
   schema and get a typed, namespaced accessor via `ctx.state.for(name)`.
   With no schema declared, `ctx.state` doesn't typecheck.
 - **Generic folding.** `createKernel().use(...)` accumulates event kinds,
-  output contracts, context contributions, and state schemas into the kernel's
-  type parameters. Registering a feature plugin before the inputs/outputs it
-  needs is a compile error (see `examples/echo-bot/type-test.ts`).
+  output contracts, typed capabilities (`TProvides`/`TInjects`, folded as
+  `TCaps`), and state schemas into the kernel's type parameters. Registering
+  a plugin before the inputs/outputs it needs or the capabilities it injects
+  is a compile error (see `examples/echo-bot/type-test.ts` and
+  `examples/websocket-bot/type-test.ts`). Untyped, string-only `inject` stays
+  runtime-gated.
 
 ## Writing a plugin
 
@@ -67,14 +73,15 @@ against plugin state within an event handler is race-free.
 
 ## Repository layout
 
-| Path                      | Package                   | Role                                           |
-| ------------------------- | ------------------------- | ---------------------------------------------- |
-| `packages/core`           | `@lambdot/core`           | kernel: effects, event bus, fibers, fold types |
-| `packages/input-console`  | `@lambdot/input-console`  | stdin `BotInput` (reference input)             |
-| `packages/output-console` | `@lambdot/output-console` | stdout `BotOutput` (reference output)          |
-| `packages/state-memory`   | `@lambdot/state-memory`   | in-memory `StateBackend` (reference backend)   |
-| `examples/echo-bot`       | —                         | echo bot and compile-time type tests           |
-| `examples/counter-bot`    | —                         | counting bot: the pluggable-state walkthrough  |
+| Path                      | Package                   | Role                                            |
+| ------------------------- | ------------------------- | ----------------------------------------------- |
+| `packages/core`           | `@lambdot/core`           | kernel: effects, event bus, fibers, fold types  |
+| `packages/input-console`  | `@lambdot/input-console`  | stdin `BotInput` (reference input)              |
+| `packages/output-console` | `@lambdot/output-console` | stdout `BotOutput` (reference output)           |
+| `packages/state-memory`   | `@lambdot/state-memory`   | in-memory `StateBackend` (reference backend)    |
+| `examples/echo-bot`       | —                         | echo bot and compile-time type tests            |
+| `examples/counter-bot`    | —                         | counting bot: the pluggable-state walkthrough   |
+| `examples/websocket-bot`  | —                         | websocket bot: the typed-capability walkthrough |
 
 ## Scripts
 

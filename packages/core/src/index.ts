@@ -20,11 +20,12 @@ export type {
 } from "./context.ts";
 export type {
     AnyPlugin,
+    CapsOf,
     ConfigOf,
-    CtxOf,
     EventsOf,
     FeaturePlugin,
     InputPlugin,
+    InjectsOf,
     OutputPlugin,
     OutputsOf,
     PluginMeta,

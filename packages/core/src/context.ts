@@ -37,12 +37,14 @@ export type ContentFor<TOutputs extends OutputContractMap, TAddress> = {
  * The typed surface every plugin sees. Parameterized by the plugin's own
  * declared needs (event kinds it handles, output platforms it sends to,
  * state schema it owns) — the kernel checks at `use()` time that the fold
- * so far satisfies them.
+ * so far satisfies them — plus the capabilities it provides (`TProvides`),
+ * which makes `provide` type-checked for declared names.
  */
 export interface ContextView<
     TEvents extends EventMap,
     TOutputs extends OutputContractMap,
     TState extends object,
+    TProvides extends object = {},
 > {
     /** Subscribe to ingress middleware (waterfall over every event). */
     on(kind: typeof INGRESS, listener: IngressListener<TEvents>, options?: OnOptions): Disposer;
@@ -90,15 +92,26 @@ export interface ContextView<
     readonly state: StateView<TState>;
 
     /**
-     * Provide a named capability for `inject` gating, optionally attaching a
-     * value to the context (the dashboard-plugin pattern: provide a service
-     * object other plugins consume). Returns the unregistering disposer.
+     * Provide a named capability for `inject` gating. Names declared in the
+     * plugin's `TProvides` require a value of the declared type (the value is
+     * attached to the context — the dashboard-plugin pattern — and read back
+     * typed through the kernel's capability fold). Undeclared names take an
+     * optional untyped value: the runtime-only capability path. Returns the
+     * unregistering disposer.
      */
-    provide(name: string, value?: unknown): Disposer;
+    provide<TName extends string>(
+        name: TName,
+        ...value: TName extends keyof TProvides & string
+            ? [value: TProvides[TName]]
+            : [value?: unknown]
+    ): Disposer;
 }
 
 /** Context seen by input plugins: adds the ability to push events into the pipeline. */
-export interface InputContext<TEvents extends EventMap> extends ContextView<TEvents, {}, {}> {
+export interface InputContext<
+    TEvents extends EventMap,
+    TProvides extends object = {},
+> extends ContextView<TEvents, {}, {}, TProvides> {
     ingest<TKind extends keyof TEvents & string>(
         kind: TKind,
         payload: TEvents[TKind]["payload"],

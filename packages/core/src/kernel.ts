@@ -6,8 +6,8 @@ import type { EventMap } from "./events.ts";
 import { Fiber } from "./fiber.ts";
 import type {
     AnyPlugin,
+    CapsOf,
     ConfigOf,
-    CtxOf,
     EventsOf,
     OutputsOf,
     Spread,
@@ -154,11 +154,11 @@ interface FiberEntry {
 export class Kernel<
     TEvents extends EventMap = {},
     TOutputs extends OutputContractMap = {},
-    TCtx extends object = {},
+    TCaps extends object = {},
     TState extends object = {},
 > {
     /** The typed context. This is the fold of everything registered so far. */
-    readonly ctx: ContextView<TEvents, TOutputs, TState> & TCtx;
+    readonly ctx: ContextView<TEvents, TOutputs, TState, TCaps> & TCaps;
 
     private readonly runtime: RuntimeContext;
     private readonly entries: FiberEntry[] = [];
@@ -173,21 +173,21 @@ export class Kernel<
             if (!available) void this.deactivateDependents(name).catch(this.onError);
             if (available) void this.activateEligible().catch(this.onError);
         };
-        this.ctx = this.runtime as unknown as ContextView<TEvents, TOutputs, TState> & TCtx;
+        this.ctx = this.runtime as unknown as ContextView<TEvents, TOutputs, TState, TCaps> & TCaps;
     }
 
     /**
-     * Register a plugin. Feature plugins are gated at compile time: every
-     * event kind they handle and every output platform they send through
-     * must already be in the fold.
+     * Register a plugin. Gated at compile time: every event kind a feature
+     * handles, every output platform it sends through, and every typed
+     * capability it injects must already be in the fold.
      */
     use<TPlugin extends AnyPlugin>(
-        plugin: TPlugin & Validate<TPlugin, TEvents, TOutputs>,
+        plugin: TPlugin & Validate<TPlugin, TEvents, TOutputs, TCaps>,
         ...config: Spread<ConfigOf<TPlugin>>
     ): Kernel<
         TEvents & EventsOf<TPlugin>,
         TOutputs & OutputsOf<TPlugin>,
-        TCtx & CtxOf<TPlugin>,
+        TCaps & CapsOf<TPlugin>,
         TState & StateOf<TPlugin>
     > {
         const entry: FiberEntry = {
@@ -200,7 +200,7 @@ export class Kernel<
         return this as unknown as Kernel<
             TEvents & EventsOf<TPlugin>,
             TOutputs & OutputsOf<TPlugin>,
-            TCtx & CtxOf<TPlugin>,
+            TCaps & CapsOf<TPlugin>,
             TState & StateOf<TPlugin>
         >;
     }
