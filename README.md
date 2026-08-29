@@ -80,11 +80,14 @@ in the plugin ecosystem:
   terminal needs no external service); `websocket` is generic transport
   machinery — it owns the socket lifecycle and defers everything
   chat-specific to a `WsSpec` supplied by its consumers, so it is a core
-  behavior, not a chat platform.
-- **`protocol/`** — chat-service wire protocols (planned: `discord`, `qq`,
-  ...). A protocol package supplies one chat service's address type,
+  behavior, not a chat platform; `env` reads variables from `process.env`
+  into a typed capability.
+- **`protocol/`** — chat-service wire protocols (planned: `discord`, ...).
+  A protocol package supplies one chat service's address type,
   event/output contracts, and frame codec, riding a core transport such as
-  `@lambdot/websocket`. (Not `schema/`: "schema" in this codebase means
+  `@lambdot/websocket`. `qq` serves both QQ bot infras — the websocket
+  gateway and the webhook (reversed post) — over one REST client.
+  (Not `schema/`: "schema" in this codebase means
   Standard-Schema config validation.)
 - **`host/`** — hosting/runtime integrations: packages that embed a kernel
   into the environment it runs in. `cloudflare` provides a worker's named
@@ -98,18 +101,22 @@ Published package names stay self-describing (`@lambdot/state-memory`,
 `@lambdot/host-cloudflare`, future `@lambdot/protocol-discord`); npm
 has no category directories. Only core members keep framework-level names.
 
-| Path                       | Package                    | Role                                             |
-| -------------------------- | -------------------------- | ------------------------------------------------ |
-| `packages/core/core`       | `@lambdot/core`            | kernel: effects, event bus, fibers, fold types   |
-| `packages/core/console`    | `@lambdot/console`         | console platform (`consolePlatform` bundle)      |
-| `packages/core/websocket`  | `@lambdot/websocket`       | websocket transport (`wsPlatform` bundle)        |
-| `packages/state/memory`    | `@lambdot/state-memory`    | in-memory `StateBackend` (reference backend)     |
-| `packages/host/cloudflare` | `@lambdot/host-cloudflare` | worker bindings: KV/D1/R2 capabilities, KV state |
-| `examples/echo-bot`        | —                          | echo bot and compile-time type tests             |
-| `examples/counter-bot`     | —                          | counting bot: the pluggable-state walkthrough    |
-| `examples/websocket-bot`   | —                          | websocket bot: the typed-capability walkthrough  |
-| `examples/cloudflare-bot`  | —                          | worker bot: hono + KV bindings under miniflare   |
-| `examples/multi-echo-bot`  | —                          | one echo feature serving console + websocket     |
+| Path                       | Package                    | Role                                              |
+| -------------------------- | -------------------------- | ------------------------------------------------- |
+| `packages/core/core`       | `@lambdot/core`            | kernel: effects, event bus, fibers, fold types    |
+| `packages/core/console`    | `@lambdot/console`         | console platform (`consolePlatform` bundle)       |
+| `packages/core/websocket`  | `@lambdot/websocket`       | websocket transport (`wsPlatform` bundle)         |
+| `packages/core/env`        | `@lambdot/env`             | `process.env` variables as a typed capability     |
+| `packages/protocol/qq`     | `@lambdot/protocol-qq`     | qq protocol: gateway + webhook infras, REST api   |
+| `packages/state/memory`    | `@lambdot/state-memory`    | in-memory `StateBackend` (reference backend)      |
+| `packages/host/cloudflare` | `@lambdot/host-cloudflare` | worker bindings: KV/D1/R2 capabilities, KV state  |
+| `examples/echo-bot`        | —                          | echo bot and compile-time type tests              |
+| `examples/counter-bot`     | —                          | counting bot: the pluggable-state walkthrough     |
+| `examples/websocket-bot`   | —                          | websocket bot: the typed-capability walkthrough   |
+| `examples/cloudflare-bot`  | —                          | worker bot: hono + KV bindings under miniflare    |
+| `examples/multi-echo-bot`  | —                          | one echo feature serving console + websocket      |
+| `examples/qq-gateway-bot`  | —                          | qq bot over the websocket gateway (fake platform) |
+| `examples/qq-webhook-bot`  | —                          | qq bot over hono-served webhooks (fake platform)  |
 
 ## Scripts
 

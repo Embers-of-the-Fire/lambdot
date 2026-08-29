@@ -1,0 +1,17 @@
+{
+    "name": "@lambdot-example/qq-webhook-bot",
+    "version": "0.0.1",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "start": "nub index.ts"
+    },
+    "dependencies": {
+        "@hono/node-server": "^1.19.0",
+        "@lambdot/core": "workspace:*",
+        "@lambdot/env": "workspace:*",
+        "@lambdot/protocol-qq": "workspace:*",
+        "hono": "^4.13.5",
+        "tweetnacl": "^1.0.3"
+    }
+}

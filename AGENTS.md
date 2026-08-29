@@ -47,9 +47,11 @@ This mirrors `.github/workflows/ci.yml`. Run all three before finishing.
 
 Monorepo: `packages/<category>/*` (`@lambdot/*`) and `examples/*`
 (`@lambdot-example/*`). Package categories: `core` (the kernel plus
-platform-agnostic behaviors — the `console` reference platform and the
-`websocket` transport factories), `protocol` (chat-service wire protocols:
-discord, qq, ... — none yet), `host` (hosting/runtime integrations:
+platform-agnostic behaviors — the `console` reference platform, the
+`websocket` transport factories, and `env` for reading `process.env` into a
+typed capability), `protocol` (chat-service wire protocols: `qq` serves both
+QQ infras — the websocket gateway and the webhook (reversed post) — over one
+REST client; discord, ... none yet), `host` (hosting/runtime integrations:
 cloudflare — a worker's named KV/D1/R2 bindings as typed capabilities,
 plus a KV-backed `StateBackend` bridge), `state` (`StateBackend` implementations).
 Everything is a plugin composed via `createKernel().use(...)`; the generic

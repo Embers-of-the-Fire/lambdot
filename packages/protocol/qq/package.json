@@ -1,0 +1,13 @@
+{
+    "name": "@lambdot/protocol-qq",
+    "version": "0.0.1",
+    "type": "module",
+    "exports": {
+        ".": "./src/index.ts"
+    },
+    "dependencies": {
+        "@lambdot/core": "workspace:*",
+        "@lambdot/websocket": "workspace:*",
+        "tweetnacl": "^1.0.3"
+    }
+}
