@@ -4,10 +4,11 @@ One echo behavior served on **two platforms at once** — console
 (stdin/stdout) and websocket — from a single kernel. This is the reuse
 story of the lambdot design: platform specifics live in the input/output
 plugin pairs, and feature plugins written against the generic envelope work
-everywhere.
+everywhere. The single-platform siblings are [echo-bot](../echo-bot)
+(console only) and [websocket-bot](../websocket-bot) (websocket only).
 
-```sh
-nub run -F @lambdot-example/multi-echo-bot start
+```console
+$ nub run -F @lambdot-example/multi-echo-bot start
 ```
 
 The script first verifies the websocket leg end-to-end with a raw client,

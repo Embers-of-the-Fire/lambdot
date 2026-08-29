@@ -44,3 +44,20 @@ const counter = definePlugin<ConsoleEvents, ConsoleOutputs, CounterSchema>({
     },
 });
 ```
+
+## File layout
+
+| File       | Role                                                              |
+| ---------- | ----------------------------------------------------------------- |
+| `index.ts` | The whole bot: counter feature, console platform, memory backend. |
+
+## See also
+
+- [echo-bot](../echo-bot) — the console echo bot this one extends with
+  state.
+- [@lambdot/state-memory](../../packages/state/memory) — the `StateBackend`
+  used here; provides the `state` capability from a process-local map.
+- [@lambdot/state-sqlite](../../packages/state/sqlite) — not a
+  `StateBackend`: a typed-capability wrapper that owns a `node:sqlite`
+  connection (`DatabaseSync`) and provides it for features to build their
+  own persistence on.
