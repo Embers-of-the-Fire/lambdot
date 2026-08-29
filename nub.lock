@@ -65,6 +65,9 @@ importers:
       '@lambdot/output-console':
         specifier: workspace:*
         version: link:../../packages/output-console
+      '@lambdot/websocket':
+        specifier: workspace:*
+        version: link:../../packages/websocket
       ws:
         specifier: ^8.21.3
         version: 8.21.3
@@ -78,6 +81,9 @@ importers:
       '@lambdot/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@lambdot/websocket':
+        specifier: workspace:*
+        version: link:../../packages/websocket
       ws:
         specifier: ^8.21.3
         version: 8.21.3
@@ -104,6 +110,12 @@ importers:
         version: link:../core
 
   packages/state-memory:
+    dependencies:
+      '@lambdot/core':
+        specifier: workspace:*
+        version: link:../core
+
+  packages/websocket:
     dependencies:
       '@lambdot/core':
         specifier: workspace:*

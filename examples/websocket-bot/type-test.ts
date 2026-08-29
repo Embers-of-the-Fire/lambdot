@@ -1,18 +1,20 @@
 /**
  * Compile-time assertions for the generic-transport pattern, mirroring
  * echo-bot/type-test.ts: the fold and the registration gate must keep
- * working through the generic `wsInput`/`wsOutput` factories.
+ * working through the generic `@lambdot/websocket` factories — including
+ * with two websocket transports in one kernel.
  */
 import { createKernel, definePlugin } from "@lambdot/core";
-
-import { echoSpec, type EchoEvents, type EchoOutputs } from "./echo-spec.ts";
 import {
     wsInput,
     wsOutput,
+    wsPlatform,
     wsTransport,
     type WsCapability,
     type WsConnection,
-} from "./transport.ts";
+} from "@lambdot/websocket";
+
+import { echoSpec, type EchoEvents, type EchoOutputs } from "./echo-spec.ts";
 
 const reply = definePlugin<EchoEvents, EchoOutputs>({
     name: "reply",
@@ -26,9 +28,9 @@ const reply = definePlugin<EchoEvents, EchoOutputs>({
 });
 
 const kernel = createKernel()
-    .use(wsTransport(), { url: "ws://localhost:1" })
-    .use(wsInput(echoSpec))
-    .use(wsOutput(echoSpec))
+    .use(wsTransport("ws"), { url: "ws://localhost:1" })
+    .use(wsInput("ws", echoSpec))
+    .use(wsOutput("ws", echoSpec))
     .use(reply);
 
 // the transport's provided service is typed on the folded kernel context
@@ -54,15 +56,45 @@ void createKernel().use(reply);
 
 // the input alone satisfies neither the capability nor the output platform
 // @ts-expect-error unprovided capabilities
-void createKernel().use(wsInput(echoSpec)).use(reply);
+void createKernel().use(wsInput("ws", echoSpec)).use(reply);
 
 // typed capability injection is gated: the transport must register first
 // @ts-expect-error unprovided capabilities
-void createKernel().use(wsInput(echoSpec));
+void createKernel().use(wsInput("ws", echoSpec));
 
 // the transport config is required and typed
 // @ts-expect-error url is required
-void createKernel().use(wsTransport());
+void createKernel().use(wsTransport("ws"));
+
+// two transports with distinct capability names fold side by side
+const twoTransports = createKernel()
+    .use(wsTransport("ws-a"), { url: "ws://localhost:1" })
+    .use(wsTransport("ws-b"), { url: "ws://localhost:2" });
+const connA: WsConnection = twoTransports.ctx["ws-a"];
+const connB: WsConnection = twoTransports.ctx["ws-b"];
+void connA;
+void connB;
+
+// each platform's plugins gate on their own transport's capability
+void createKernel()
+    .use(wsTransport("ws-a"), { url: "ws://localhost:1" })
+    // @ts-expect-error "ws-b" is not in the fold yet
+    .use(wsInput("ws-b", echoSpec));
+
+// the bundled combinator: one declaration per platform, same fold behavior
+const wsecho = wsPlatform("ws", echoSpec);
+const bundled = createKernel()
+    .use(wsecho.transport, { url: "ws://localhost:1" })
+    .use(wsecho.input)
+    .use(wsecho.output)
+    .use(reply);
+const bundledConnection: WsConnection = bundled.ctx.ws;
+void bundledConnection;
+void bundled.ctx.send({ platform: "wsecho" }, "ok");
+
+// the bundle does not bypass the registration gate
+// @ts-expect-error the transport must register before the input that injects it
+void createKernel().use(wsecho.input);
 
 // injected capability value types are checked against the fold
 const wrongCaps = definePlugin<{}, {}, undefined, void, string, {}, { ws: number }>({
@@ -71,10 +103,10 @@ const wrongCaps = definePlugin<{}, {}, undefined, void, string, {}, { ws: number
     apply: () => {},
 });
 // @ts-expect-error ws is a WsConnection, not a number
-void createKernel().use(wsTransport(), { url: "ws://localhost:1" }).use(wrongCaps);
+void createKernel().use(wsTransport("ws"), { url: "ws://localhost:1" }).use(wrongCaps);
 
 // with typed TInjects declared, inject is restricted to the declared names
-void definePlugin<{}, {}, undefined, void, string, {}, WsCapability>({
+void definePlugin<{}, {}, undefined, void, string, {}, WsCapability<"ws">>({
     name: "bad-inject",
     // @ts-expect-error "state" is not a declared capability need
     inject: ["state"],
@@ -82,7 +114,7 @@ void definePlugin<{}, {}, undefined, void, string, {}, WsCapability>({
 });
 
 // provide is type-checked against the declaring plugin's TProvides
-void definePlugin<{}, {}, undefined, void, string, WsCapability>({
+void definePlugin<{}, {}, undefined, void, string, WsCapability<"ws">>({
     name: "bad-provider",
     apply(ctx) {
         ctx.provide("ws", connection);

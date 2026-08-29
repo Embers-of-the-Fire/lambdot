@@ -1,14 +1,16 @@
 import { createKernel } from "@lambdot/core";
 import { consoleInput } from "@lambdot/input-console";
 import { consoleOutput } from "@lambdot/output-console";
+import { wsPlatform } from "@lambdot/websocket";
 
 import { echoSpec } from "./echo-spec.ts";
 import { echo } from "./echo.ts";
 import { startEchoServer } from "./server.ts";
-import { wsInput, wsOutput, wsTransport } from "./transport.ts";
 
 const server = await startEchoServer(8080);
 const url = `ws://127.0.0.1:${server.port}`;
+
+const wsecho = wsPlatform("ws", echoSpec);
 
 // One kernel, two platforms: console (stdin/stdout) and websocket. The
 // shared `echo` feature must come last — the type fold requires every event
@@ -17,9 +19,9 @@ const url = `ws://127.0.0.1:${server.port}`;
 const kernel = createKernel()
     .use(consoleInput())
     .use(consoleOutput())
-    .use(wsTransport(), { url })
-    .use(wsInput(echoSpec))
-    .use(wsOutput(echoSpec))
+    .use(wsecho.transport, { url })
+    .use(wsecho.input)
+    .use(wsecho.output)
     .use(echo);
 
 await kernel.start();

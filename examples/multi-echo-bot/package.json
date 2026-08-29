@@ -10,6 +10,7 @@
         "@lambdot/core": "workspace:*",
         "@lambdot/input-console": "workspace:*",
         "@lambdot/output-console": "workspace:*",
+        "@lambdot/websocket": "workspace:*",
         "ws": "^8.21.3"
     },
     "devDependencies": {

@@ -46,12 +46,17 @@ This mirrors `.github/workflows/ci.yml`. Run all three before finishing.
 ## Architecture in one breath
 
 Monorepo: `packages/*` (`@lambdot/*` — `core` kernel plus reference
-input/output/state plugins) and `examples/*` (`@lambdot-example/*`). Everything
+input/output/state plugins and the `websocket` transport factories) and
+`examples/*` (`@lambdot-example/*`). Everything
 is a plugin composed via `createKernel().use(...)`; the generic fold means
 **registration order is enforced at compile time** — inputs/outputs must be
 registered before feature plugins that consume them, and typed capabilities
 (`TProvides`/`TInjects`, folded as `TCaps`) before plugins that inject them.
 Untyped, string-only `inject` (e.g. `"state"`) stays runtime-gated only.
+For websocket platforms, prefer the `wsPlatform(capability, spec)` bundle
+from `@lambdot/websocket`; reach for the individual
+`wsTransport`/`wsInput`/`wsOutput` factories only when a platform needs the
+pieces separately.
 
 `examples/echo-bot/type-test.ts` is a compile-time test suite: every
 `@ts-expect-error` line must remain a genuine error. Do not "fix" the flagged

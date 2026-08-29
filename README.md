@@ -79,6 +79,7 @@ against plugin state within an event handler is race-free.
 | `packages/input-console`  | `@lambdot/input-console`  | stdin `BotInput` (reference input)              |
 | `packages/output-console` | `@lambdot/output-console` | stdout `BotOutput` (reference output)           |
 | `packages/state-memory`   | `@lambdot/state-memory`   | in-memory `StateBackend` (reference backend)    |
+| `packages/websocket`      | `@lambdot/websocket`      | websocket platforms (`wsPlatform` bundle)       |
 | `examples/echo-bot`       | —                         | echo bot and compile-time type tests            |
 | `examples/counter-bot`    | —                         | counting bot: the pluggable-state walkthrough   |
 | `examples/websocket-bot`  | —                         | websocket bot: the typed-capability walkthrough |

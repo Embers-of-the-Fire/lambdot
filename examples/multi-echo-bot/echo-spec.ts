@@ -1,6 +1,5 @@
 import type { Address, EventDef, OutputContract } from "@lambdot/core";
-
-import type { WsSpec } from "./transport.ts";
+import type { WsSpec } from "@lambdot/websocket";
 
 /** Where a wsecho message goes: the server's single broadcast channel. */
 export type WsEchoAddress = Address<"wsecho">;

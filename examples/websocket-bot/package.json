@@ -8,6 +8,7 @@
     },
     "dependencies": {
         "@lambdot/core": "workspace:*",
+        "@lambdot/websocket": "workspace:*",
         "ws": "^8.21.3"
     },
     "devDependencies": {

@@ -53,12 +53,13 @@ Three properties of the core make this one handler serve both platforms:
 | -------------- | ------------------------------------------------------------------ |
 | `echo.ts`      | The shared feature plugin — the only file that is "the bot".       |
 | `echo-spec.ts` | The websocket platform's specific half: platform tag, kind, codec. |
-| `transport.ts` | Generic websocket transport + `wsInput`/`wsOutput` factories.      |
 | `server.ts`    | Demo broadcast server standing in for a real chat service.         |
 | `index.ts`     | Composition root: one kernel, both platforms, self-check + REPL.   |
 
 The console platform needs no local files — it comes from
-`@lambdot/input-console` / `@lambdot/output-console`.
+`@lambdot/input-console` / `@lambdot/output-console`; the websocket
+transport and the `wsInput`/`wsOutput` factories come from
+`@lambdot/websocket`.
 
 ## Extending to a real third platform (e.g. Discord)
 
@@ -69,8 +70,11 @@ beyond widening two type unions and adding one `ctx.on` line:
    `"discord"`, event kind `"discord.message"`, and a `decode` that
    normalizes Discord's frame into `{ payload: string, address }` (the
    address carrying whatever the reply needs — channel id, reply reference).
-2. Register `.use(discordTransport(), config).use(wsInput(discordSpec)).use(wsOutput(discordSpec))`
-   before `.use(echo)`.
+2. Declare `const discord = wsPlatform("ws-discord", discordSpec)` and
+   register `.use(discord.transport, config).use(discord.input).use(discord.output)`
+   before `.use(echo)`. The capability name is what keeps it independent of
+   the existing `"ws"` transport: both connections live side by side in one
+   kernel, and each platform's plugins activate with their own.
 3. Widen the feature's declared maps and the `reply` address union.
 
 If a platform's payload can't be normalized to `string` in `decode`, branch

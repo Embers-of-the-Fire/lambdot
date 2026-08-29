@@ -1,8 +1,8 @@
 import { createKernel, definePlugin } from "@lambdot/core";
+import { wsPlatform } from "@lambdot/websocket";
 
 import { echoSpec, type EchoEvents, type EchoOutputs } from "./echo-spec.ts";
 import { startEchoServer } from "./server.ts";
-import { wsInput, wsOutput, wsTransport } from "./transport.ts";
 
 const reply = definePlugin<EchoEvents, EchoOutputs>({
     name: "reply",
@@ -13,13 +13,15 @@ const reply = definePlugin<EchoEvents, EchoOutputs>({
     },
 });
 
-const server = await startEchoServer();
+const server = await startEchoServer(8080);
 const url = `ws://127.0.0.1:${server.port}`;
 
+const wsecho = wsPlatform("ws", echoSpec);
+
 const kernel = createKernel()
-    .use(wsTransport(), { url })
-    .use(wsInput(echoSpec))
-    .use(wsOutput(echoSpec))
+    .use(wsecho.transport, { url })
+    .use(wsecho.input)
+    .use(wsecho.output)
     .use(reply);
 
 await kernel.start();
