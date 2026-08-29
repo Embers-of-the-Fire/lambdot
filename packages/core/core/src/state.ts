@@ -1,8 +1,8 @@
 /**
- * Pluggable state. The framework core is stateless; state is an injected
- * capability provided by exactly one backend plugin. Plugins declare their
- * schema at the type level and receive a typed accessor namespaced to their
- * plugin name.
+ * Pluggable state. The framework core is stateless; state is an ordinary
+ * feature plugin providing its backend as the `"state"` capability (at most
+ * one may be active). Plugins declare their schema at the type level and
+ * receive a typed accessor namespaced to their plugin name.
  */
 export interface StateBackend {
     get(namespace: string, key: string): Promise<unknown>;

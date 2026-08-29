@@ -1,4 +1,4 @@
-import type { Disposer, FeaturePlugin, StateBackend, StatePlugin } from "@lambdot/core";
+import type { Disposer, FeaturePlugin, StateBackend } from "@lambdot/core";
 
 import type { D1Database, KVNamespace, KVPutOptions, R2Bucket } from "./bindings.ts";
 
@@ -189,9 +189,9 @@ export function envVars<TCap extends string, TKey extends string>(
 
 /**
  * Bridge a named Workers KV namespace into the framework's pluggable state
- * slot, so feature plugins reach it through `ctx.state`. Consumes the
- * capability provided by {@link kvNamespace} — register the namespace
- * first:
+ * slot, so feature plugins reach it through `ctx.state`. Injects the
+ * capability provided by {@link kvNamespace} — the fold enforces
+ * registration order at compile time:
  *
  * ```ts
  * createKernel()
@@ -206,45 +206,29 @@ export function envVars<TCap extends string, TKey extends string>(
  */
 export function kvState<TCap extends string>(
     capability: TCap,
-): StatePlugin<void, `state-kv:${TCap}`> {
-    let binding: KVNamespace | undefined;
-    const namespace = (): KVNamespace => {
-        if (!binding)
-            throw new Error(
-                `state backend "state-kv:${capability}" is not active — register kvNamespace("${capability}") first`,
-            );
-        return binding;
-    };
-
-    const backend: StateBackend = {
-        async get(ns, key) {
-            const value = await namespace().get(`${ns}:${key}`, { type: "json" });
-            return value === null ? undefined : value;
-        },
-        async set(ns, key, value, ttlMs) {
-            const options: KVPutOptions =
-                ttlMs === undefined ? {} : { expirationTtl: Math.max(60, Math.ceil(ttlMs / 1000)) };
-            await namespace().put(`${ns}:${key}`, JSON.stringify(value), options);
-        },
-        async delete(ns, key) {
-            await namespace().delete(`${ns}:${key}`);
-        },
-    };
-
+): FeaturePlugin<{}, {}, undefined, void, `state-kv:${TCap}`, {}, KVCapability<TCap>> {
     return {
-        role: "state",
         name: `state-kv:${capability}`,
         inject: [capability],
-        backend,
         apply(ctx) {
-            // State plugins keep string-only `inject` (runtime-gated), so the
-            // typed capability fold never reaches this context;
-            // `KVCapability<TCap>` already ties the name to `KVNamespace`, so
-            // pin the read down here.
-            binding = (ctx as unknown as KVCapability<TCap>)[capability];
-            return () => {
-                binding = undefined;
+            const binding = ctx[capability];
+            const backend: StateBackend = {
+                async get(ns, key) {
+                    const value = await binding.get(`${ns}:${key}`, { type: "json" });
+                    return value === null ? undefined : value;
+                },
+                async set(ns, key, value, ttlMs) {
+                    const options: KVPutOptions =
+                        ttlMs === undefined
+                            ? {}
+                            : { expirationTtl: Math.max(60, Math.ceil(ttlMs / 1000)) };
+                    await binding.put(`${ns}:${key}`, JSON.stringify(value), options);
+                },
+                async delete(ns, key) {
+                    await binding.delete(`${ns}:${key}`);
+                },
             };
+            return ctx.provide("state", backend);
         },
     };
 }

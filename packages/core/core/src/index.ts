@@ -31,7 +31,6 @@ export type {
     PluginMeta,
     Spread,
     StateOf,
-    StatePlugin,
     Validate,
 } from "./plugin.ts";
 export { definePlugin } from "./plugin.ts";

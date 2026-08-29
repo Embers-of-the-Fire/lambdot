@@ -8,7 +8,6 @@ import type {
 import type { Effect } from "./effect.ts";
 import type { EventMap } from "./events.ts";
 import type { StandardSchemaV1 } from "./schema.ts";
-import type { StateBackend } from "./state.ts";
 
 /**
  * The `inject` requirement: once a plugin declares typed capability needs
@@ -70,17 +69,6 @@ export interface OutputPlugin<
     apply?(ctx: ContextView<{}, {}, {}, TProvides> & TInjects, config: TConfig): Effect;
 }
 
-/** Provides the `state` capability via its backend. At most one may be active. */
-export interface StatePlugin<
-    TConfig = void,
-    TName extends string = string,
-> extends PluginMeta<TConfig> {
-    readonly role: "state";
-    readonly name: TName;
-    readonly backend: StateBackend;
-    apply?(ctx: ContextView<{}, {}, {}>, config: TConfig): Effect;
-}
-
 /**
  * A unit of behavior. Declares the event kinds it handles (`TNeeds`), the
  * output platforms it sends through (`TSends`), and optionally a state
@@ -115,7 +103,6 @@ export interface FeaturePlugin<
 export type AnyPlugin =
     | InputPlugin<any, any, any, any, any>
     | OutputPlugin<any, any, any, any, any, any, any>
-    | StatePlugin<any, any>
     | FeaturePlugin<any, any, any, any, any, any, any>;
 
 /* ------------------------------------------------------------------ */

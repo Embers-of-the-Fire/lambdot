@@ -33,7 +33,6 @@ class RuntimeContext {
         { send(to: never, content: never): void | Promise<void> }
     >();
     private readonly provided = new Map<string, unknown>();
-    private stateBackend: StateBackend | undefined;
     /** Events are processed sequentially, in ingestion order. */
     private queue: Promise<void> = Promise.resolve();
     onProvideChange: (name: string, available: boolean) => void = () => {};
@@ -84,17 +83,12 @@ class RuntimeContext {
         };
     }
 
-    registerStateBackend(backend: StateBackend): Disposer {
-        if (this.stateBackend) throw new Error("a state backend is already active");
-        this.stateBackend = backend;
-        return () => {
-            this.stateBackend = undefined;
-        };
-    }
-
     readonly state = {
         for: (plugin: string) => {
-            const backend = this.stateBackend;
+            // State has no dedicated runtime slot: a state plugin is an
+            // ordinary feature plugin that provides its backend as the
+            // (runtime-gated) "state" capability.
+            const backend = this.provided.get("state") as StateBackend | undefined;
             if (!backend)
                 throw new Error(
                     'no state backend active — register a state plugin and add `inject: ["state"]`',
@@ -281,10 +275,6 @@ export class Kernel<
         if (plugin.role === "output") {
             fiber.state = "active";
             fiber.addDisposer(this.runtime.registerOutput(plugin.platform, plugin));
-        } else if (plugin.role === "state") {
-            fiber.state = "active";
-            fiber.addDisposer(this.runtime.registerStateBackend(plugin.backend));
-            fiber.addDisposer(this.runtime.provide("state"));
         } else {
             fiber.state = "active";
         }
