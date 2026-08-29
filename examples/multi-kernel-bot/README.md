@@ -24,8 +24,9 @@ or the bridge misbehaves — it is its own integration test.
    byte-for-byte identical plugin stack — same `"ws"` capability, same
    `"wsecho"` platform, same `"wsecho.message"` kind. Nothing collides
    because the registries those names key into are per-kernel. Contrast with
-   `dual-websocket-bot` (two platforms in _one_ kernel), where every
-   instance needs distinct capability/platform/kind tags.
+   [dual-websocket-bot](../dual-websocket-bot) (two platforms in _one_
+   kernel), where every instance needs distinct capability/platform/kind
+   tags.
 2. **Instance identity lives in config, not in types.** The bots differ only
    in factory arguments — a name for logs and a URL for the socket. The type
    fold of each kernel stays exact and tag-free.
@@ -87,7 +88,8 @@ B's queue — kernel A's internals are invisible to it.
 
 ## When to choose this over one kernel
 
-- **One kernel, tagged instances** (`dual-websocket-bot`): the platforms are
+- **One kernel, tagged instances** ([dual-websocket-bot](../dual-websocket-bot)):
+  the platforms are
   genuinely one bot — shared middleware (the ingress waterfall sees
   everything), shared state, one sequential event queue, replies routed by
   the shared fold.

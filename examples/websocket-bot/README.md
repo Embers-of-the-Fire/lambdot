@@ -31,9 +31,10 @@ trip fails — it is its own integration test.
    flow through the generic fold, so registration-order gating keeps working.
 3. **The capability name is a parameter, so instances multiply.** Each
    `wsTransport(name)` provides under its own name; two websocket platforms
-   (one for discord, one for qq) share a kernel as
-   `WsCapability<"ws-discord"> & WsCapability<"ws-qq">` in the fold, each
-   platform's plugins gating on their own transport — see `type-test.ts`.
+   share a kernel as `WsCapability<"ws-a"> & WsCapability<"ws-b">` in the
+   fold, each platform's plugins gating on their own transport — see
+   `type-test.ts`, and [dual-websocket-bot](../dual-websocket-bot) for the
+   runnable version.
 4. **Typed injection, compile-time gated.** The factories declare
    `TInjects = WsCapability<"ws">`; inside `apply`, `ctx.ws` is typed with no
    casts. Registering them before `wsTransport("ws")` is a compile error
@@ -62,21 +63,26 @@ const kernel = createKernel()
 ```
 
 Two websocket platforms share one kernel by declaring two bundles under
-distinct capability names:
+distinct capability names, with tagged specs (one factory call per
+instance) so the platform tags and event kinds stay unique:
 
 ```ts
-const discord = wsPlatform("ws-discord", discordSpec);
-const qq = wsPlatform("ws-qq", qqSpec);
+const wsechoA = wsPlatform("ws-a", echoSpec("a"));
+const wsechoB = wsPlatform("ws-b", echoSpec("b"));
 
 const kernel = createKernel()
-    .use(discord.transport, { url: discordUrl })
-    .use(qq.transport, { url: qqUrl })
-    .use(discord.input)
-    .use(discord.output)
-    .use(qq.input)
-    .use(qq.output)
-    .use(myFeature);
+    .use(wsechoA.transport, { url: urlA })
+    .use(wsechoA.input)
+    .use(wsechoA.output)
+    .use(wsechoB.transport, { url: urlB })
+    .use(wsechoB.input)
+    .use(wsechoB.output)
+    .use(reply);
 ```
+
+This sketch is realized in [dual-websocket-bot](../dual-websocket-bot),
+where `echoSpec(tag)` mints one spec per instance and a raw client drives
+both sockets concurrently to prove no cross-dispatch.
 
 The individual `wsTransport` / `wsInput` / `wsOutput` factories the bundle
 wraps stay exported for cases that need the pieces separately — points 1–5
@@ -86,3 +92,19 @@ directly.
 Swapping in a real platform means replacing `echoSpec` (codec, address shape,
 event vocabulary) and pointing `url` at a gateway — the transport, the
 factories, and the reply feature don't change.
+
+## File layout
+
+| File           | Role                                                                 |
+| -------------- | -------------------------------------------------------------------- |
+| `echo-spec.ts` | The platform's specific half: platform tag, event kind, frame codec. |
+| `server.ts`    | Demo broadcast server standing in for a real chat service.           |
+| `index.ts`     | Composition root: server, kernel, raw-client round trip, self-check. |
+| `type-test.ts` | Compile-time assertions for the generic factories and the fold.      |
+
+## Where next
+
+- [dual-websocket-bot](../dual-websocket-bot) — two tagged instances of this
+  exact platform sharing one kernel.
+- [multi-kernel-bot](../multi-kernel-bot) — the same bot twice, but isolated
+  in two kernels with an explicit bridge.
