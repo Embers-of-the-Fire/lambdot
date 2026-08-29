@@ -55,8 +55,8 @@ them:
   handler — `ctx.rooms.get(ctx.rooms.idFromName(name)).fetch(request)`.
 - `doState()` is the per-instance counterpart of `kvState`: a Durable
   Object's transactional storage arrives on its constructor state rather
-  than on `env` (and each instance has exactly one), so it is passed
-  straight as config — `.use(doState(), { storage: this.state.storage })` —
+  than on `env` (and each instance has exactly one), so it is passed to
+  the kernel factory and straight on as config — `.use(doState(), { storage })` —
   and provided as the framework's `"state"` slot. Values are
   structured-cloneable (no JSON round trip) and there is no TTL, since
   Durable Object storage has no expiry mechanism.

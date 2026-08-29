@@ -42,9 +42,9 @@ integration test, exiting non-zero on any wrong frame.
    behalf of a different Durable Object").
 3. **Per-instance state with `doState()`.** The `reply` feature counts
    messages through `ctx.state.for("reply")`, served from the instance's
-   transactional storage — passed straight as config
-   (`.use(doState(), { storage: this.state.storage })`), since a Durable
-   Object's storage arrives on its constructor state, not on `env`. Two rooms
+   transactional storage — passed to the kernel factory and straight on as
+   config (`.use(doState(), { storage })`), since a Durable Object's storage
+   arrives on its constructor state, not on `env`. Two rooms
    on one namespace never share a value: "other" starts its counter at zero
    while "lobby" is at two.
 4. **The namespace binding as a capability.** The worker's fetch handler is
