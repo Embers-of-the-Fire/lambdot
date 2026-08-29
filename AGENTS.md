@@ -52,8 +52,8 @@ platform-agnostic behaviors — the `console` reference platform, the
 typed capability), `protocol` (chat-service wire protocols: `qq` serves both
 QQ infras — the websocket gateway and the webhook (reversed post) — over one
 REST client; discord, ... none yet), `host` (hosting/runtime integrations:
-cloudflare — a worker's named KV/D1/R2 bindings as typed capabilities,
-plus a KV-backed `StateBackend` bridge), `state` (`StateBackend` implementations).
+cloudflare — a worker's named KV/D1/R2 bindings and plain environment
+variables as typed capabilities, plus a KV-backed `StateBackend` bridge), `state` (`StateBackend` implementations).
 Everything is a plugin composed via `createKernel().use(...)`; the generic
 fold means
 **registration order is enforced at compile time** — inputs/outputs must be

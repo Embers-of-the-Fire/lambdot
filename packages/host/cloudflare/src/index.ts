@@ -35,6 +35,16 @@ export type KVCapability<TCap extends string> = { readonly [K in TCap]: KVNamesp
 export type D1Capability<TCap extends string> = { readonly [K in TCap]: D1Database };
 export type R2Capability<TCap extends string> = { readonly [K in TCap]: R2Bucket };
 
+/**
+ * The typed capability contract shared by an environment provider and its
+ * consumers — the same shape as `EnvCapability` in `@lambdot/env`, declared
+ * locally so the package stays dependency-free. The two are structurally
+ * identical, so a consumer typed against either accepts both providers.
+ */
+export type EnvCapability<TCap extends string, TKey extends string> = {
+    readonly [K in TCap]: Readonly<Record<TKey, string>>;
+};
+
 /** Config for {@link kvNamespace}: the binding as it arrives on the worker's `env`. */
 export interface KVNamespaceConfig {
     readonly binding: KVNamespace;
@@ -48,6 +58,15 @@ export interface D1DatabaseConfig {
 /** Config for {@link r2Bucket}: the binding as it arrives on the worker's `env`. */
 export interface R2BucketConfig {
     readonly binding: R2Bucket;
+}
+
+/**
+ * Config for {@link envVars}: the worker's bindings object as it arrives on
+ * the fetch handler's `env` argument, carrying plain vars and secrets next
+ * to the resource bindings.
+ */
+export interface EnvVarsConfig {
+    readonly source: Record<string, unknown>;
 }
 
 /**
@@ -127,6 +146,43 @@ export function r2Bucket<TCap extends string>(
                 capability,
                 config.binding,
             );
+        },
+    };
+}
+
+/**
+ * Read variables from a worker's bindings object and provide them as a
+ * typed capability — the Cloudflare counterpart of `envVars` in
+ * `@lambdot/env`: workers have no `process.env`, so plain vars and secrets
+ * arrive on `env` next to the resource bindings. A missing, empty, or
+ * non-string variable fails activation loudly at kernel start, so a
+ * misconfigured deployment surfaces before any consumer activates.
+ *
+ * ```ts
+ * createKernel().use(envVars("bot-env", ["BOT_TOKEN"]), { source: env });
+ * // ctx["bot-env"].BOT_TOKEN: string
+ * ```
+ */
+export function envVars<TCap extends string, TKey extends string>(
+    capability: TCap,
+    keys: readonly TKey[],
+): FeaturePlugin<{}, {}, undefined, EnvVarsConfig, `env:${TCap}`, EnvCapability<TCap, TKey>> {
+    return {
+        name: `env:${capability}`,
+        apply(ctx, config) {
+            const values: Record<string, string> = {};
+            for (const key of keys) {
+                const value = config.source[key];
+                if (typeof value !== "string" || value === "")
+                    throw new Error(
+                        `env:${capability}: required environment variable "${key}" is not set`,
+                    );
+                values[key] = value;
+            }
+            // See `kvNamespace` for why `provide` is pinned here.
+            return (
+                ctx.provide as (name: TCap, value: Readonly<Record<TKey, string>>) => Disposer
+            ).call(ctx, capability, values as Readonly<Record<TKey, string>>);
         },
     };
 }

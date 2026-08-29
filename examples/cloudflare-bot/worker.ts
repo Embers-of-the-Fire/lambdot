@@ -1,13 +1,20 @@
 import type { Address, EventDef, InputPlugin } from "@lambdot/core";
 import { createKernel, definePlugin } from "@lambdot/core";
 import type { KVNamespace } from "@lambdot/host-cloudflare";
-import { kvNamespace, kvState } from "@lambdot/host-cloudflare";
+import { envVars, kvNamespace, kvState } from "@lambdot/host-cloudflare";
 import { Hono } from "hono";
 
-/** The worker's named bindings, as declared in the miniflare/wrangler config. */
-interface Env {
+/**
+ * The worker's named bindings, as declared in the miniflare/wrangler config.
+ * Declared as a `type` (not an `interface`) so the whole object stays
+ * assignable to `EnvVarsConfig["source"]` — interfaces get no implicit
+ * index signature.
+ */
+type Env = {
+    /** Plain text var: the fallback message for a ping without a body. */
+    readonly PING_DEFAULT_MESSAGE: string;
     readonly PINGS: KVNamespace;
-}
+};
 
 /** Events produced at the HTTP boundary: one per ping request. */
 export type PingEvents = {
@@ -85,6 +92,7 @@ const pingPong = definePlugin<PingEvents, {}, PingPongSchema, void, "ping-pong",
 function createBot(env: Env) {
     return createKernel()
         .use(pingInput())
+        .use(envVars("bot-env", ["PING_DEFAULT_MESSAGE"]), { source: env })
         .use(kvNamespace("pings"), { binding: env.PINGS })
         .use(kvState("pings"))
         .use(pingPong);
@@ -100,7 +108,9 @@ app.post("/ping", async (c) => {
     bot ??= createBot(c.env);
     await bot.start();
 
-    let message = "ping";
+    // No message in the request body? Fall back to the worker's configured
+    // var, read through the env capability fold.
+    let message = bot.ctx["bot-env"].PING_DEFAULT_MESSAGE;
     try {
         const body: unknown = await c.req.json();
         if (
