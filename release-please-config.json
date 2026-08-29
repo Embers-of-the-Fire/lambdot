@@ -1,0 +1,44 @@
+{
+    "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+    "release-type": "node",
+    "bump-minor-pre-major": true,
+    "separate-pull-requests": false,
+    "packages": {
+        "packages/core/console": {
+            "component": "console"
+        },
+        "packages/core/core": {
+            "component": "core"
+        },
+        "packages/core/env": {
+            "component": "env"
+        },
+        "packages/core/websocket": {
+            "component": "websocket"
+        },
+        "packages/host/cloudflare": {
+            "component": "host-cloudflare"
+        },
+        "packages/protocol/qq": {
+            "component": "protocol-qq"
+        },
+        "packages/state/memory": {
+            "component": "state-memory"
+        }
+    },
+    "plugins": [
+        {
+            "type": "linked-versions",
+            "groupName": "lambdot",
+            "components": [
+                "console",
+                "core",
+                "env",
+                "websocket",
+                "host-cloudflare",
+                "protocol-qq",
+                "state-memory"
+            ]
+        }
+    ]
+}

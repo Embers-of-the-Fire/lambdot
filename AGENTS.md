@@ -28,6 +28,29 @@ There is **no test runner and no test suite**. Verification is, in order:
 
 This mirrors `.github/workflows/ci.yml`. Run all three before finishing.
 
+## Releases
+
+Release automation is release-plz-style, built on release-please
+(`release-please-config.json` + `.release-please-manifest.json` +
+`.github/workflows/release.yml`):
+
+- Pushing conventional commits to `main` maintains a single release PR that
+  bumps all `@lambdot/*` packages in lockstep (`linked-versions` plugin) and
+  updates their `CHANGELOG.md` files. Pre-1.0 semantics
+  (`bump-minor-pre-major`): `feat` and breaking changes bump minor, `fix`
+  bumps patch. To cut 1.0.0, set `"release-as": "1.0.0"` in the config for
+  one release cycle.
+- Merging the release PR tags each package (`<component>-vX.Y.Z`), creates
+  the GitHub releases, and publishes to npm with provenance. Requires an
+  `NPM_TOKEN` Actions secret with publish rights on the `@lambdot` scope.
+- `scripts/rewrite-workspace-deps.ts` resolves `workspace:*` ranges to real
+  versions on the throwaway CI checkout before `nub publish` — nub forwards
+  `workspace:` specs verbatim and registries must never see them. Never run
+  it on a real working tree.
+- A new publishable package must be registered in both release-please files:
+  `packages` + the `linked-versions` `components` list in the config (same
+  component name in both), and the manifest.
+
 ## Repo-specific rules that will bite you
 
 - **Packages ship raw TypeScript source** — `exports` points at
