@@ -86,26 +86,30 @@ in the plugin ecosystem:
   event/output contracts, and frame codec, riding a core transport such as
   `@lambdot/websocket`. (Not `schema/`: "schema" in this codebase means
   Standard-Schema config validation.)
-- **`host/`** — hosting/runtime integrations (planned: `cloudflare-worker`,
-  ...): packages that embed a kernel into the environment it runs in. (Not
+- **`host/`** — hosting/runtime integrations: packages that embed a kernel
+  into the environment it runs in. `cloudflare` provides a worker's named
+  bindings (KV namespaces, D1 databases, R2 buckets) as typed capabilities,
+  plus a bridge that serves `ctx.state` from a KV namespace. (Not
   `platform/`: "platform" in the framework already denotes the chat service
   an address belongs to — `Address.platform`, `OutputPlugin.platform`.)
 - **`state/`** — `StateBackend` implementations.
 
 Published package names stay self-describing (`@lambdot/state-memory`,
-future `@lambdot/protocol-discord`, `@lambdot/host-cloudflare-worker`); npm
+`@lambdot/host-cloudflare`, future `@lambdot/protocol-discord`); npm
 has no category directories. Only core members keep framework-level names.
 
-| Path                      | Package                 | Role                                            |
-| ------------------------- | ----------------------- | ----------------------------------------------- |
-| `packages/core/core`      | `@lambdot/core`         | kernel: effects, event bus, fibers, fold types  |
-| `packages/core/console`   | `@lambdot/console`      | console platform (`consolePlatform` bundle)     |
-| `packages/core/websocket` | `@lambdot/websocket`    | websocket transport (`wsPlatform` bundle)       |
-| `packages/state/memory`   | `@lambdot/state-memory` | in-memory `StateBackend` (reference backend)    |
-| `examples/echo-bot`       | —                       | echo bot and compile-time type tests            |
-| `examples/counter-bot`    | —                       | counting bot: the pluggable-state walkthrough   |
-| `examples/websocket-bot`  | —                       | websocket bot: the typed-capability walkthrough |
-| `examples/multi-echo-bot` | —                       | one echo feature serving console + websocket    |
+| Path                       | Package                    | Role                                             |
+| -------------------------- | -------------------------- | ------------------------------------------------ |
+| `packages/core/core`       | `@lambdot/core`            | kernel: effects, event bus, fibers, fold types   |
+| `packages/core/console`    | `@lambdot/console`         | console platform (`consolePlatform` bundle)      |
+| `packages/core/websocket`  | `@lambdot/websocket`       | websocket transport (`wsPlatform` bundle)        |
+| `packages/state/memory`    | `@lambdot/state-memory`    | in-memory `StateBackend` (reference backend)     |
+| `packages/host/cloudflare` | `@lambdot/host-cloudflare` | worker bindings: KV/D1/R2 capabilities, KV state |
+| `examples/echo-bot`        | —                          | echo bot and compile-time type tests             |
+| `examples/counter-bot`     | —                          | counting bot: the pluggable-state walkthrough    |
+| `examples/websocket-bot`   | —                          | websocket bot: the typed-capability walkthrough  |
+| `examples/cloudflare-bot`  | —                          | worker bot: hono + KV bindings under miniflare   |
+| `examples/multi-echo-bot`  | —                          | one echo feature serving console + websocket     |
 
 ## Scripts
 

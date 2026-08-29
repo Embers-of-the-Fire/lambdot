@@ -1,0 +1,16 @@
+{
+    "name": "@lambdot-example/cloudflare-bot",
+    "version": "0.0.1",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "start": "nub index.ts"
+    },
+    "dependencies": {
+        "@lambdot/core": "workspace:*",
+        "@lambdot/host-cloudflare": "workspace:*",
+        "esbuild": "^0.28.2",
+        "hono": "^4.13.5",
+        "miniflare": "^4"
+    }
+}

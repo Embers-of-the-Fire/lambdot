@@ -50,7 +50,8 @@ Monorepo: `packages/<category>/*` (`@lambdot/*`) and `examples/*`
 platform-agnostic behaviors — the `console` reference platform and the
 `websocket` transport factories), `protocol` (chat-service wire protocols:
 discord, qq, ... — none yet), `host` (hosting/runtime integrations:
-cloudflare-worker, ... — none yet), `state` (`StateBackend` implementations).
+cloudflare — a worker's named KV/D1/R2 bindings as typed capabilities,
+plus a KV-backed `StateBackend` bridge), `state` (`StateBackend` implementations).
 Everything is a plugin composed via `createKernel().use(...)`; the generic
 fold means
 **registration order is enforced at compile time** — inputs/outputs must be
