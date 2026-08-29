@@ -20,6 +20,18 @@ type Env = {
  */
 declare const WebSocketPair: new () => { 0: WebSocket; 1: WebSocket };
 
+/**
+ * Whether the request asks for a websocket upgrade. `Upgrade` is a
+ * comma-separated list of ASCII case-insensitive tokens (RFC 9110 §7.8), so
+ * `WebSocket` (or `websocket, h2c`) must match just like `websocket` —
+ * otherwise a stricter client gets a spurious 404/426 mid-handshake.
+ */
+function isWebSocketUpgrade(request: Request): boolean {
+    return (request.headers.get("Upgrade") ?? "")
+        .split(",")
+        .some((token) => token.trim().toLowerCase() === "websocket");
+}
+
 interface ChatSchema {
     count: number;
 }
@@ -70,7 +82,7 @@ export class ChatRoom extends DurableObject<Env> {
     private kernel: ReturnType<typeof createRoomKernel> | undefined;
 
     async fetch(request: Request): Promise<Response> {
-        if (request.headers.get("Upgrade") !== "websocket")
+        if (!isWebSocketUpgrade(request))
             return new Response("expected a websocket upgrade", { status: 426 });
 
         this.kernel ??= createRoomKernel(this.roomHub, request.url, this.ctx.storage);
@@ -99,7 +111,7 @@ export default {
     async fetch(request: Request, env: Env): Promise<Response> {
         const roomName = /^\/room\/(?<name>[\w-]+)$/.exec(new URL(request.url).pathname)?.groups
             ?.name;
-        if (roomName === undefined || request.headers.get("Upgrade") !== "websocket")
+        if (roomName === undefined || !isWebSocketUpgrade(request))
             return new Response("not found", { status: 404 });
 
         router ??= createRouter(env);
