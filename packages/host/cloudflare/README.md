@@ -1,10 +1,12 @@
 # @lambdot/host-cloudflare
 
 A Cloudflare host integration: it embeds a kernel into a worker by turning
-the worker's `env` — named KV namespaces, D1 databases, R2 buckets, and
-plain environment variables — into typed capabilities that feature plugins
-inject through the kernel's capability fold, plus a bridge that serves
-`ctx.state` from a KV namespace. The package is dependency-free (only
+the worker's `env` — named KV namespaces, D1 databases, R2 buckets, Durable
+Object namespaces, and plain environment variables — into typed capabilities
+that feature plugins inject through the kernel's capability fold, plus
+state bridges that serve `ctx.state` from a KV namespace or a Durable
+Object's own storage, and a server-side websocket hub for Durable Objects.
+The package is dependency-free (only
 `@lambdot/core`): the binding types are structural subsets of
 `@cloudflare/workers-types`, so real bindings from a worker's `env` are
 assignable as-is, and anything Cloudflare adds beyond them stays available
@@ -13,7 +15,8 @@ through the consumer's own types.
 ## Bindings as capabilities
 
 Cloudflare bindings are named — a worker binds several KV namespaces, D1
-databases, and R2 buckets under distinct names — so each provider factory
+databases, R2 buckets, and Durable Object namespaces under distinct names —
+so each provider factory
 takes its capability name as a parameter and instances multiply: register
 `kvNamespace("sessions")` and `kvNamespace("cache")` side by side and the
 two fold as `KVCapability<"sessions"> & KVCapability<"cache">`, exactly like
@@ -40,6 +43,32 @@ plugins reach it through `ctx.state.for(name)`. Values are stored as JSON
 under `<plugin-namespace>:<key>`. KV expiries are whole seconds with a
 60-second minimum, so a plugin's `ttlMs` is rounded up and clamped to that
 floor.
+
+## Durable Objects
+
+Three pieces cover Durable Objects, one per place the runtime surfaces
+them:
+
+- `durableObjectNamespace(name)` is the binding provider for the worker
+  side: `{ binding: env.ROOM }`, provided as `DoCapability<TCap>` exactly
+  like the KV/D1/R2 providers. Routing to an instance stays in the fetch
+  handler — `ctx.rooms.get(ctx.rooms.idFromName(name)).fetch(request)`.
+- `doState()` is the per-instance counterpart of `kvState`: a Durable
+  Object's transactional storage arrives on its constructor state rather
+  than on `env` (and each instance has exactly one), so it is passed
+  straight as config — `.use(doState(), { storage: this.state.storage })` —
+  and provided as the framework's `"state"` slot. Values are
+  structured-cloneable (no JSON round trip) and there is no TTL, since
+  Durable Object storage has no expiry mechanism.
+- `wsHub(name)` is the server-side mirror of `wsTransport` in
+  `@lambdot/websocket`: instead of dialing out, the Durable Object accepts
+  incoming sockets. It returns a bundle — the hub the fetch handler accepts
+  `WebSocketPair` server ends into, and the plugin providing that hub under
+  the capability name — with the exact `WsConnection` shape, so the generic
+  `wsInput`/`wsOutput` halves (a `wsPlatform` bundle minus its transport)
+  drive it unchanged. Where the transport owns one client socket, the hub
+  fans out: `send` broadcasts to every accepted socket, `onMessage`
+  receives from any of them.
 
 ## Usage
 
@@ -77,21 +106,28 @@ Consumers read `bot.ctx["bot-env"].PING_DEFAULT_MESSAGE` and
 Providers — each is a `FeaturePlugin` whose `apply` provides the binding
 under its capability name:
 
-| Export                | Plugin name       | Capability                  | Config              |
-| --------------------- | ----------------- | --------------------------- | ------------------- |
-| `kvNamespace(name)`   | `kv:<name>`       | `KVCapability<TCap>`        | `KVNamespaceConfig` |
-| `d1Database(name)`    | `d1:<name>`       | `D1Capability<TCap>`        | `D1DatabaseConfig`  |
-| `r2Bucket(name)`      | `r2:<name>`       | `R2Capability<TCap>`        | `R2BucketConfig`    |
-| `envVars(name, keys)` | `env:<name>`      | `EnvCapability<TCap, TKey>` | `EnvVarsConfig`     |
-| `kvState(name)`       | `state-kv:<name>` | provides `"state"`          | none                |
+| Export                         | Plugin name       | Capability                  | Config                         |
+| ------------------------------ | ----------------- | --------------------------- | ------------------------------ |
+| `kvNamespace(name)`            | `kv:<name>`       | `KVCapability<TCap>`        | `KVNamespaceConfig`            |
+| `d1Database(name)`             | `d1:<name>`       | `D1Capability<TCap>`        | `D1DatabaseConfig`             |
+| `r2Bucket(name)`               | `r2:<name>`       | `R2Capability<TCap>`        | `R2BucketConfig`               |
+| `envVars(name, keys)`          | `env:<name>`      | `EnvCapability<TCap, TKey>` | `EnvVarsConfig`                |
+| `durableObjectNamespace(name)` | `do:<name>`       | `DoCapability<TCap>`        | `DurableObjectNamespaceConfig` |
+| `kvState(name)`                | `state-kv:<name>` | provides `"state"`          | none                           |
+| `doState()`                    | `state-do`        | provides `"state"`          | `DoStorageConfig`              |
+| `wsHub(name)`                  | `ws-hub:<name>`   | `WsHubCapability<TCap>`     | `WsHubConfig`                  |
 
-Binding types (`KVNamespace`, `D1Database`, `R2Bucket` and their
-result/option types) are re-exported from `src/bindings.ts`; `EnvCapability`
+Binding types (`KVNamespace`, `D1Database`, `R2Bucket`,
+`DurableObjectNamespace`, `DurableObjectState` and their result/option
+types) are re-exported from `src/bindings.ts`; `EnvCapability`
 is structurally identical to the one in `@lambdot/env`, so a consumer typed
 against either accepts both providers.
 
 See [examples/cloudflare-bot](../../../examples/cloudflare-bot) for a
-complete worker: hono + a KV-backed counter running under miniflare.
+complete worker — hono + a KV-backed counter running under miniflare — and
+[examples/durable-object-bot](../../../examples/durable-object-bot) for the
+Durable Object half: a websocket chat room per DO instance, driven by
+`wsHub` + `doState` under miniflare.
 
 ## License
 

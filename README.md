@@ -101,25 +101,26 @@ Published package names stay self-describing (`@lambdot/state-memory`,
 `@lambdot/host-cloudflare`, future `@lambdot/protocol-discord`); npm
 has no category directories. Only core members keep framework-level names.
 
-| Path                          | Package                    | Role                                              |
-| ----------------------------- | -------------------------- | ------------------------------------------------- |
-| `packages/core/core`          | `@lambdot/core`            | kernel: effects, event bus, fibers, fold types    |
-| `packages/core/console`       | `@lambdot/console`         | console platform (`consolePlatform` bundle)       |
-| `packages/core/websocket`     | `@lambdot/websocket`       | websocket transport (`wsPlatform` bundle)         |
-| `packages/core/env`           | `@lambdot/env`             | `process.env` variables as a typed capability     |
-| `packages/protocol/qq`        | `@lambdot/protocol-qq`     | qq protocol: gateway + webhook infras, REST api   |
-| `packages/state/memory`       | `@lambdot/state-memory`    | in-memory `StateBackend` (reference backend)      |
-| `packages/state/sqlite`       | `@lambdot/state-sqlite`    | `node:sqlite` connection as a typed capability    |
-| `packages/host/cloudflare`    | `@lambdot/host-cloudflare` | worker bindings: KV/D1/R2 capabilities, KV state  |
-| `examples/echo-bot`           | —                          | echo bot and compile-time type tests              |
-| `examples/counter-bot`        | —                          | counting bot: the pluggable-state walkthrough     |
-| `examples/websocket-bot`      | —                          | websocket bot: the typed-capability walkthrough   |
-| `examples/dual-websocket-bot` | —                          | two tagged websocket platforms sharing one kernel |
-| `examples/multi-kernel-bot`   | —                          | two kernels, one supervisor, an explicit bridge   |
-| `examples/cloudflare-bot`     | —                          | worker bot: hono + KV bindings under miniflare    |
-| `examples/multi-echo-bot`     | —                          | one echo feature serving console + websocket      |
-| `examples/qq-gateway-bot`     | —                          | qq bot over the websocket gateway (fake platform) |
-| `examples/qq-webhook-bot`     | —                          | qq bot over hono-served webhooks (fake platform)  |
+| Path                          | Package                    | Role                                               |
+| ----------------------------- | -------------------------- | -------------------------------------------------- |
+| `packages/core/core`          | `@lambdot/core`            | kernel: effects, event bus, fibers, fold types     |
+| `packages/core/console`       | `@lambdot/console`         | console platform (`consolePlatform` bundle)        |
+| `packages/core/websocket`     | `@lambdot/websocket`       | websocket transport (`wsPlatform` bundle)          |
+| `packages/core/env`           | `@lambdot/env`             | `process.env` variables as a typed capability      |
+| `packages/protocol/qq`        | `@lambdot/protocol-qq`     | qq protocol: gateway + webhook infras, REST api    |
+| `packages/state/memory`       | `@lambdot/state-memory`    | in-memory `StateBackend` (reference backend)       |
+| `packages/state/sqlite`       | `@lambdot/state-sqlite`    | `node:sqlite` connection as a typed capability     |
+| `packages/host/cloudflare`    | `@lambdot/host-cloudflare` | worker bindings: KV/D1/R2/DO capabilities + state  |
+| `examples/echo-bot`           | —                          | echo bot and compile-time type tests               |
+| `examples/counter-bot`        | —                          | counting bot: the pluggable-state walkthrough      |
+| `examples/websocket-bot`      | —                          | websocket bot: the typed-capability walkthrough    |
+| `examples/dual-websocket-bot` | —                          | two tagged websocket platforms sharing one kernel  |
+| `examples/multi-kernel-bot`   | —                          | two kernels, one supervisor, an explicit bridge    |
+| `examples/cloudflare-bot`     | —                          | worker bot: hono + KV bindings under miniflare     |
+| `examples/durable-object-bot` | —                          | DO bot: websocket rooms + DO state under miniflare |
+| `examples/multi-echo-bot`     | —                          | one echo feature serving console + websocket       |
+| `examples/qq-gateway-bot`     | —                          | qq bot over the websocket gateway (fake platform)  |
+| `examples/qq-webhook-bot`     | —                          | qq bot over hono-served webhooks (fake platform)   |
 
 ## Scripts
 

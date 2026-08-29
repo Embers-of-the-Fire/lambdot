@@ -73,6 +73,24 @@ importers:
         specifier: ^8.18.1
         version: 8.18.1
 
+  examples/durable-object-bot:
+    dependencies:
+      '@lambdot/core':
+        specifier: workspace:*
+        version: link:../../packages/core/core
+      '@lambdot/host-cloudflare':
+        specifier: workspace:*
+        version: link:../../packages/host/cloudflare
+      '@lambdot/websocket':
+        specifier: workspace:*
+        version: link:../../packages/core/websocket
+      esbuild:
+        specifier: ^0.28.2
+        version: 0.28.2
+      miniflare:
+        specifier: ^4
+        version: 4.20260730.0
+
   examples/echo-bot:
     dependencies:
       '@lambdot/console':

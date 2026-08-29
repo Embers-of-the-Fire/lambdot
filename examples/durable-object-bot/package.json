@@ -1,0 +1,16 @@
+{
+    "name": "@lambdot-example/durable-object-bot",
+    "version": "0.0.1",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "start": "nub index.ts"
+    },
+    "dependencies": {
+        "@lambdot/core": "workspace:*",
+        "@lambdot/host-cloudflare": "workspace:*",
+        "@lambdot/websocket": "workspace:*",
+        "esbuild": "^0.28.2",
+        "miniflare": "^4"
+    }
+}
