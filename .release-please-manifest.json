@@ -5,5 +5,6 @@
     "packages/core/websocket": "0.0.1",
     "packages/host/cloudflare": "0.0.1",
     "packages/protocol/qq": "0.0.1",
-    "packages/state/memory": "0.0.1"
+    "packages/state/memory": "0.0.1",
+    "packages/state/sqlite": "0.0.1"
 }

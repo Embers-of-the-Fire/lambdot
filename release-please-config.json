@@ -24,6 +24,9 @@
         },
         "packages/state/memory": {
             "component": "state-memory"
+        },
+        "packages/state/sqlite": {
+            "component": "state-sqlite"
         }
     },
     "plugins": [
@@ -37,7 +40,8 @@
                 "websocket",
                 "host-cloudflare",
                 "protocol-qq",
-                "state-memory"
+                "state-memory",
+                "state-sqlite"
             ]
         }
     ]

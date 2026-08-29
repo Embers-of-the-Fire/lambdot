@@ -220,6 +220,12 @@ importers:
         specifier: workspace:*
         version: link:../../core/core
 
+  packages/state/sqlite:
+    dependencies:
+      '@lambdot/core':
+        specifier: workspace:*
+        version: link:../../core/core
+
 packages:
 
   '@cloudflare/workerd-darwin-64@1.20260730.1':

@@ -76,7 +76,9 @@ typed capability), `protocol` (chat-service wire protocols: `qq` serves both
 QQ infras — the websocket gateway and the webhook (reversed post) — over one
 REST client; discord, ... none yet), `host` (hosting/runtime integrations:
 cloudflare — a worker's named KV/D1/R2 bindings and plain environment
-variables as typed capabilities, plus a KV-backed `StateBackend` bridge), `state` (`StateBackend` implementations).
+variables as typed capabilities, plus a KV-backed `StateBackend` bridge), `state` (`StateBackend`
+implementations like `memory`, plus `sqlite` which owns a `node:sqlite`
+connection and provides it as a typed capability, D1-style).
 Everything is a plugin composed via `createKernel().use(...)`; the generic
 fold means
 **registration order is enforced at compile time** — inputs/outputs must be
