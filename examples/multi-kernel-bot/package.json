@@ -1,0 +1,17 @@
+{
+    "name": "@lambdot-example/multi-kernel-bot",
+    "version": "0.0.1",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "start": "nub index.ts"
+    },
+    "dependencies": {
+        "@lambdot/core": "workspace:*",
+        "@lambdot/websocket": "workspace:*",
+        "ws": "^8.21.3"
+    },
+    "devDependencies": {
+        "@types/ws": "^8.18.1"
+    }
+}
