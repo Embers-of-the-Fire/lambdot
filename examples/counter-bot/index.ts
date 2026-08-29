@@ -1,6 +1,5 @@
+import { consolePlatform, type ConsoleEvents, type ConsoleOutputs } from "@lambdot/console";
 import { createKernel, definePlugin } from "@lambdot/core";
-import { consoleInput, type ConsoleEvents } from "@lambdot/input-console";
-import { consoleOutput, type ConsoleOutputs } from "@lambdot/output-console";
 import { memoryState } from "@lambdot/state-memory";
 
 interface CounterSchema {
@@ -20,10 +19,8 @@ const counter = definePlugin<ConsoleEvents, ConsoleOutputs, CounterSchema>({
     },
 });
 
-const kernel = createKernel()
-    .use(consoleInput())
-    .use(consoleOutput())
-    .use(memoryState())
-    .use(counter);
+const cli = consolePlatform();
+
+const kernel = createKernel().use(cli.input).use(cli.output).use(memoryState()).use(counter);
 
 await kernel.start();

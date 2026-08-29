@@ -2,9 +2,13 @@
  * Compile-time assertions for the kernel's generic fold. Run by `typecheck`;
  * every `@ts-expect-error` must stay a genuine error.
  */
+import {
+    consolePlatform,
+    type ConsoleAddress,
+    type ConsoleEvents,
+    type ConsoleOutputs,
+} from "@lambdot/console";
 import { createKernel, definePlugin } from "@lambdot/core";
-import { consoleInput, type ConsoleEvents } from "@lambdot/input-console";
-import { consoleOutput, type ConsoleAddress, type ConsoleOutputs } from "@lambdot/output-console";
 
 const echo = definePlugin<ConsoleEvents, ConsoleOutputs>({
     name: "echo",
@@ -19,7 +23,9 @@ const echo = definePlugin<ConsoleEvents, ConsoleOutputs>({
     },
 });
 
-const kernel = createKernel().use(consoleInput()).use(consoleOutput()).use(echo);
+const cli = consolePlatform();
+
+const kernel = createKernel().use(cli.input).use(cli.output).use(echo);
 
 // send rejects content that doesn.t match the platform's contract
 void kernel.ctx.send({ platform: "console", target: "stdout" }, "ok");
@@ -44,4 +50,4 @@ void createKernel().use(echo);
 
 // registering the output before the input still gates on the missing kind
 // @ts-expect-error unregistered event kinds
-void createKernel().use(consoleOutput()).use(echo);
+void createKernel().use(cli.output).use(echo);

@@ -57,7 +57,7 @@ Three properties of the core make this one handler serve both platforms:
 | `index.ts`     | Composition root: one kernel, both platforms, self-check + REPL.   |
 
 The console platform needs no local files — it comes from
-`@lambdot/input-console` / `@lambdot/output-console`; the websocket
+`@lambdot/console` (the `consolePlatform` bundle); the websocket
 transport and the `wsInput`/`wsOutput` factories come from
 `@lambdot/websocket`.
 

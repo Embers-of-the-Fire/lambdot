@@ -1,12 +1,11 @@
 {
-    "name": "@lambdot/input-console",
+    "name": "@lambdot/console",
     "version": "0.0.1",
     "type": "module",
     "exports": {
         ".": "./src/index.ts"
     },
     "dependencies": {
-        "@lambdot/core": "workspace:*",
-        "@lambdot/output-console": "workspace:*"
+        "@lambdot/core": "workspace:*"
     }
 }

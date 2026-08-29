@@ -29,42 +29,33 @@ importers:
 
   examples/counter-bot:
     dependencies:
+      '@lambdot/console':
+        specifier: workspace:*
+        version: link:../../packages/console
       '@lambdot/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@lambdot/input-console':
-        specifier: workspace:*
-        version: link:../../packages/input-console
-      '@lambdot/output-console':
-        specifier: workspace:*
-        version: link:../../packages/output-console
       '@lambdot/state-memory':
         specifier: workspace:*
         version: link:../../packages/state-memory
 
   examples/echo-bot:
     dependencies:
+      '@lambdot/console':
+        specifier: workspace:*
+        version: link:../../packages/console
       '@lambdot/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@lambdot/input-console':
-        specifier: workspace:*
-        version: link:../../packages/input-console
-      '@lambdot/output-console':
-        specifier: workspace:*
-        version: link:../../packages/output-console
 
   examples/multi-echo-bot:
     dependencies:
+      '@lambdot/console':
+        specifier: workspace:*
+        version: link:../../packages/console
       '@lambdot/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@lambdot/input-console':
-        specifier: workspace:*
-        version: link:../../packages/input-console
-      '@lambdot/output-console':
-        specifier: workspace:*
-        version: link:../../packages/output-console
       '@lambdot/websocket':
         specifier: workspace:*
         version: link:../../packages/websocket
@@ -92,22 +83,13 @@ importers:
         specifier: ^8.18.1
         version: 8.18.1
 
+  packages/console:
+    dependencies:
+      '@lambdot/core':
+        specifier: workspace:*
+        version: link:../core
+
   packages/core: {}
-
-  packages/input-console:
-    dependencies:
-      '@lambdot/core':
-        specifier: workspace:*
-        version: link:../core
-      '@lambdot/output-console':
-        specifier: workspace:*
-        version: link:../output-console
-
-  packages/output-console:
-    dependencies:
-      '@lambdot/core':
-        specifier: workspace:*
-        version: link:../core
 
   packages/state-memory:
     dependencies:

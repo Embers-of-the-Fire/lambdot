@@ -1,6 +1,5 @@
+import { consolePlatform, type ConsoleEvents, type ConsoleOutputs } from "@lambdot/console";
 import { createKernel, definePlugin } from "@lambdot/core";
-import { consoleInput, type ConsoleEvents } from "@lambdot/input-console";
-import { consoleOutput, type ConsoleOutputs } from "@lambdot/output-console";
 
 const echo = definePlugin<ConsoleEvents, ConsoleOutputs>({
     name: "echo",
@@ -9,7 +8,9 @@ const echo = definePlugin<ConsoleEvents, ConsoleOutputs>({
     },
 });
 
-const kernel = createKernel().use(consoleInput()).use(consoleOutput()).use(echo);
+const cli = consolePlatform();
+
+const kernel = createKernel().use(cli.input).use(cli.output).use(echo);
 
 await kernel.start();
 

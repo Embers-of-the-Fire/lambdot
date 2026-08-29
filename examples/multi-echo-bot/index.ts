@@ -1,6 +1,5 @@
+import { consolePlatform } from "@lambdot/console";
 import { createKernel } from "@lambdot/core";
-import { consoleInput } from "@lambdot/input-console";
-import { consoleOutput } from "@lambdot/output-console";
 import { wsPlatform } from "@lambdot/websocket";
 
 import { echoSpec } from "./echo-spec.ts";
@@ -10,6 +9,7 @@ import { startEchoServer } from "./server.ts";
 const server = await startEchoServer(8080);
 const url = `ws://127.0.0.1:${server.port}`;
 
+const cli = consolePlatform();
 const wsecho = wsPlatform("ws", echoSpec);
 
 // One kernel, two platforms: console (stdin/stdout) and websocket. The
@@ -17,8 +17,8 @@ const wsecho = wsPlatform("ws", echoSpec);
 // kind it handles and every output platform it sends through to be
 // registered first.
 const kernel = createKernel()
-    .use(consoleInput())
-    .use(consoleOutput())
+    .use(cli.input)
+    .use(cli.output)
     .use(wsecho.transport, { url })
     .use(wsecho.input)
     .use(wsecho.output)

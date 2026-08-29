@@ -7,8 +7,7 @@
         "start": "nub index.ts"
     },
     "dependencies": {
-        "@lambdot/core": "workspace:*",
-        "@lambdot/input-console": "workspace:*",
-        "@lambdot/output-console": "workspace:*"
+        "@lambdot/console": "workspace:*",
+        "@lambdot/core": "workspace:*"
     }
 }

@@ -1,7 +1,6 @@
+import type { ConsoleAddress, ConsoleEvents, ConsoleOutputs } from "@lambdot/console";
 import type { BotEvent } from "@lambdot/core";
 import { definePlugin } from "@lambdot/core";
-import type { ConsoleEvents } from "@lambdot/input-console";
-import type { ConsoleAddress, ConsoleOutputs } from "@lambdot/output-console";
 
 import type { EchoEvents, EchoOutputs, WsEchoAddress } from "./echo-spec.ts";
 

@@ -57,8 +57,7 @@ $ nub examples/echo-bot/index.ts     # the echo bot: type a line, get it echoed
 
 ```ts
 import { definePlugin } from "@lambdot/core";
-import type { ConsoleEvents } from "@lambdot/input-console";
-import type { ConsoleOutputs } from "@lambdot/output-console";
+import type { ConsoleEvents, ConsoleOutputs } from "@lambdot/console";
 
 const echo = definePlugin<ConsoleEvents, ConsoleOutputs>({
     name: "echo",
@@ -73,17 +72,16 @@ against plugin state within an event handler is race-free.
 
 ## Repository layout
 
-| Path                      | Package                   | Role                                            |
-| ------------------------- | ------------------------- | ----------------------------------------------- |
-| `packages/core`           | `@lambdot/core`           | kernel: effects, event bus, fibers, fold types  |
-| `packages/input-console`  | `@lambdot/input-console`  | stdin `BotInput` (reference input)              |
-| `packages/output-console` | `@lambdot/output-console` | stdout `BotOutput` (reference output)           |
-| `packages/state-memory`   | `@lambdot/state-memory`   | in-memory `StateBackend` (reference backend)    |
-| `packages/websocket`      | `@lambdot/websocket`      | websocket platforms (`wsPlatform` bundle)       |
-| `examples/echo-bot`       | —                         | echo bot and compile-time type tests            |
-| `examples/counter-bot`    | —                         | counting bot: the pluggable-state walkthrough   |
-| `examples/websocket-bot`  | —                         | websocket bot: the typed-capability walkthrough |
-| `examples/multi-echo-bot` | —                         | one echo feature serving console + websocket    |
+| Path                      | Package                 | Role                                            |
+| ------------------------- | ----------------------- | ----------------------------------------------- |
+| `packages/core`           | `@lambdot/core`         | kernel: effects, event bus, fibers, fold types  |
+| `packages/console`        | `@lambdot/console`      | console platform (`consolePlatform` bundle)     |
+| `packages/state-memory`   | `@lambdot/state-memory` | in-memory `StateBackend` (reference backend)    |
+| `packages/websocket`      | `@lambdot/websocket`    | websocket platforms (`wsPlatform` bundle)       |
+| `examples/echo-bot`       | —                       | echo bot and compile-time type tests            |
+| `examples/counter-bot`    | —                       | counting bot: the pluggable-state walkthrough   |
+| `examples/websocket-bot`  | —                       | websocket bot: the typed-capability walkthrough |
+| `examples/multi-echo-bot` | —                       | one echo feature serving console + websocket    |
 
 ## Scripts
 
