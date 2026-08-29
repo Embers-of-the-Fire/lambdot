@@ -5,6 +5,9 @@
     "exports": {
         ".": "./src/index.ts"
     },
+    "publishConfig": {
+        "access": "public"
+    },
     "dependencies": {
         "@lambdot/core": "workspace:*",
         "@lambdot/websocket": "workspace:*",
