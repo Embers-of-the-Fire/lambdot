@@ -68,7 +68,12 @@ them:
   `wsInput`/`wsOutput` halves (a `wsPlatform` bundle minus its transport)
   drive it unchanged. Where the transport owns one client socket, the hub
   fans out: `send` broadcasts to every accepted socket, `onMessage`
-  receives from any of them.
+  receives from any of them. Create the hub (and the `wsPlatform` bundle)
+  per Durable Object instance, never at module level — both keep sockets,
+  listeners, and transport state in closures, and co-resident instances
+  share the isolate's module scope, so module-level instances would
+  cross-wire two rooms. Hold the hub in instance state and boot the kernel
+  lazily in `fetch()` with `request.url`.
 
 ## Usage
 

@@ -146,23 +146,36 @@ export interface WsHub<TCap extends string> {
  * the hub the Durable Object's fetch handler accepts `WebSocketPair` server
  * ends into, and the plugin that provides the hub under `capability`, so the
  * generic `wsInput`/`wsOutput` halves (or a `wsPlatform` bundle minus its
- * transport) drive it unchanged:
+ * transport) drive it unchanged.
+ *
+ * Create the hub — and the `wsPlatform` bundle — **per Durable Object
+ * instance**, never at module level: both keep sockets, listeners, and
+ * transport state in closures, and co-resident instances share the
+ * isolate's module scope, so module-level instances would cross-wire two
+ * rooms (one room's broadcasts leaking into another's sockets). The
+ * instance's URL is only known per request, so hold the hub in instance
+ * state and boot the kernel lazily in `fetch()` with `request.url`:
  *
  * ```ts
- * const room = wsHub("room");
- * const chat = wsPlatform("room", chatSpec);
- *
  * class ChatRoom extends DurableObject {
- *     private kernel = createKernel()
+ *     private readonly room = wsHub("room");
+ *     private kernel: ReturnType<typeof createRoomKernel> | undefined;
+ *
+ *     async fetch(request: Request) {
+ *         this.kernel ??= createRoomKernel(this.room, request.url);
+ *         await this.kernel.start(); // `start` is idempotent
+ *         const pair = new WebSocketPair();
+ *         this.room.hub.accept(pair[1]);
+ *         return new Response(null, { status: 101, webSocket: pair[0] });
+ *     }
+ * }
+ *
+ * function createRoomKernel(room: WsHub<"room">, url: string) {
+ *     const chat = wsPlatform("room", chatSpec); // fresh bundle per kernel
+ *     return createKernel()
  *         .use(room.plugin, { url })
  *         .use(chat.input)
  *         .use(chat.output);
- *     async fetch(request: Request) {
- *         await this.kernel.start();
- *         const pair = new WebSocketPair();
- *         room.hub.accept(pair[1]);
- *         return new Response(null, { status: 101, webSocket: pair[0] });
- *     }
  * }
  * ```
  */
