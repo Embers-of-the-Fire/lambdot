@@ -72,12 +72,36 @@ against plugin state within an event handler is race-free.
 
 ## Repository layout
 
+Packages live at `packages/<category>/<name>`, grouped by the role they play
+in the plugin ecosystem:
+
+- **`core/`** — the kernel and the platform-agnostic behaviors shipped with
+  the framework. The `console` package is the reference chat platform (a
+  terminal needs no external service); `websocket` is generic transport
+  machinery — it owns the socket lifecycle and defers everything
+  chat-specific to a `WsSpec` supplied by its consumers, so it is a core
+  behavior, not a chat platform.
+- **`protocol/`** — chat-service wire protocols (planned: `discord`, `qq`,
+  ...). A protocol package supplies one chat service's address type,
+  event/output contracts, and frame codec, riding a core transport such as
+  `@lambdot/websocket`. (Not `schema/`: "schema" in this codebase means
+  Standard-Schema config validation.)
+- **`host/`** — hosting/runtime integrations (planned: `cloudflare-worker`,
+  ...): packages that embed a kernel into the environment it runs in. (Not
+  `platform/`: "platform" in the framework already denotes the chat service
+  an address belongs to — `Address.platform`, `OutputPlugin.platform`.)
+- **`state/`** — `StateBackend` implementations.
+
+Published package names stay self-describing (`@lambdot/state-memory`,
+future `@lambdot/protocol-discord`, `@lambdot/host-cloudflare-worker`); npm
+has no category directories. Only core members keep framework-level names.
+
 | Path                      | Package                 | Role                                            |
 | ------------------------- | ----------------------- | ----------------------------------------------- |
-| `packages/core`           | `@lambdot/core`         | kernel: effects, event bus, fibers, fold types  |
-| `packages/console`        | `@lambdot/console`      | console platform (`consolePlatform` bundle)     |
-| `packages/state-memory`   | `@lambdot/state-memory` | in-memory `StateBackend` (reference backend)    |
-| `packages/websocket`      | `@lambdot/websocket`    | websocket platforms (`wsPlatform` bundle)       |
+| `packages/core/core`      | `@lambdot/core`         | kernel: effects, event bus, fibers, fold types  |
+| `packages/core/console`   | `@lambdot/console`      | console platform (`consolePlatform` bundle)     |
+| `packages/core/websocket` | `@lambdot/websocket`    | websocket transport (`wsPlatform` bundle)       |
+| `packages/state/memory`   | `@lambdot/state-memory` | in-memory `StateBackend` (reference backend)    |
 | `examples/echo-bot`       | —                       | echo bot and compile-time type tests            |
 | `examples/counter-bot`    | —                       | counting bot: the pluggable-state walkthrough   |
 | `examples/websocket-bot`  | —                       | websocket bot: the typed-capability walkthrough |

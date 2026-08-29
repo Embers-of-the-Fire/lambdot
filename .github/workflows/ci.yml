@@ -36,7 +36,7 @@ jobs:
 
             - name: Typecheck
               run: |
-                  for project in packages/* examples/*; do
+                  for project in packages/*/* examples/*; do
                     echo "::group::tsc -p $project"
                     npx tsc -p "$project"
                     echo "::endgroup::"

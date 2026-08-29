@@ -23,7 +23,7 @@ There is **no test runner and no test suite**. Verification is, in order:
    and checks nothing:
 
     ```sh
-    for project in packages/* examples/*; do npx tsc -p "$project"; done
+    for project in packages/*/* examples/*; do npx tsc -p "$project"; done
     ```
 
 This mirrors `.github/workflows/ci.yml`. Run all three before finishing.
@@ -45,10 +45,14 @@ This mirrors `.github/workflows/ci.yml`. Run all three before finishing.
 
 ## Architecture in one breath
 
-Monorepo: `packages/*` (`@lambdot/*` — `core` kernel plus reference
-input/output/state plugins and the `websocket` transport factories) and
-`examples/*` (`@lambdot-example/*`). Everything
-is a plugin composed via `createKernel().use(...)`; the generic fold means
+Monorepo: `packages/<category>/*` (`@lambdot/*`) and `examples/*`
+(`@lambdot-example/*`). Package categories: `core` (the kernel plus
+platform-agnostic behaviors — the `console` reference platform and the
+`websocket` transport factories), `protocol` (chat-service wire protocols:
+discord, qq, ... — none yet), `host` (hosting/runtime integrations:
+cloudflare-worker, ... — none yet), `state` (`StateBackend` implementations).
+Everything is a plugin composed via `createKernel().use(...)`; the generic
+fold means
 **registration order is enforced at compile time** — inputs/outputs must be
 registered before feature plugins that consume them, and typed capabilities
 (`TProvides`/`TInjects`, folded as `TCaps`) before plugins that inject them.
