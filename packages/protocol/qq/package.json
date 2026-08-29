@@ -5,9 +5,12 @@
     "exports": {
         ".": "./src/index.ts"
     },
+    "publishConfig": {
+        "access": "public"
+    },
     "dependencies": {
-        "@lambdot/core": "workspace:*",
-        "@lambdot/websocket": "workspace:*",
+        "@lambdot/core": "0.1.0",
+        "@lambdot/websocket": "0.1.0",
         "tweetnacl": "^1.0.3"
     }
 }

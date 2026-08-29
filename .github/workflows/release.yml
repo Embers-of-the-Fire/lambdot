@@ -38,7 +38,11 @@ jobs:
         runs-on: ubuntu-latest
         permissions:
             contents: read
-            id-token: write # OIDC, required by `nub publish --provenance`
+            # OIDC token for npm Trusted Publishing: nub exchanges it with
+            # the registry for a short-lived package-scoped publish token,
+            # so no long-lived npm token is needed. npm also generates the
+            # provenance attestation automatically on this path.
+            id-token: write
         steps:
             - uses: actions/checkout@v7
 
@@ -46,15 +50,5 @@ jobs:
               with:
                   cache-dependency-path: nub.lock
 
-            # Packages depend on each other via `workspace:*`, which must
-            # never reach the registry; resolve it to real versions on this
-            # throwaway checkout before publishing.
-            - name: Resolve workspace protocol ranges
-              run: nub scripts/rewrite-workspace-deps.ts
-
             - name: Publish workspace packages
-              env:
-                  NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-              run: |
-                  printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" > .npmrc
-                  nub publish -r --filter '@lambdot/*' --access public --no-git-checks --provenance
+              run: nub publish -r --filter '@lambdot/*' --access public --no-git-checks --provenance
