@@ -91,8 +91,10 @@ in the plugin ecosystem:
   Standard-Schema config validation.)
 - **`host/`** — hosting/runtime integrations: packages that embed a kernel
   into the environment it runs in. `cloudflare` provides a worker's named
-  bindings (KV namespaces, D1 databases, R2 buckets) as typed capabilities,
-  plus a bridge that serves `ctx.state` from a KV namespace. (Not
+  bindings (KV namespaces, D1 databases, R2 buckets, Durable Object
+  namespaces) as typed capabilities, plus bridges that serve `ctx.state`
+  from a KV namespace or Durable Object storage, and `wsHub`, the
+  server-side (Durable Object) mirror of `wsTransport`. (Not
   `platform/`: "platform" in the framework already denotes the chat service
   an address belongs to — `Address.platform`, `OutputPlugin.platform`.)
 - **`state/`** — `StateBackend` implementations.
