@@ -41,12 +41,17 @@ Release automation is release-plz-style, built on release-please
   bumps patch. To cut 1.0.0, set `"release-as": "1.0.0"` in the config for
   one release cycle.
 - Merging the release PR tags each package (`<component>-vX.Y.Z`), creates
-  the GitHub releases, and publishes to npm with provenance. Requires an
-  `NPM_TOKEN` Actions secret with publish rights on the `@lambdot` scope.
-- `scripts/rewrite-workspace-deps.ts` resolves `workspace:*` ranges to real
-  versions on the throwaway CI checkout before `nub publish` — nub forwards
-  `workspace:` specs verbatim and registries must never see them. Never run
-  it on a real working tree.
+  the GitHub releases, and publishes to npm with provenance. Publishing
+  authenticates via **npm Trusted Publishing** (OIDC): each package needs a
+  Trusted Publisher entry on npmjs.com pointing at this repo and
+  `release.yml`, and the workflow assumes every package already exists on
+  npm. Bootstrap a brand-new package by publishing a placeholder manually
+  (`nub publish`) and then adding its Trusted Publisher entry.
+- Inter-package pins in publishable packages are exact (`"0.1.0"`, never
+  `workspace:*` — nub forwards `workspace:` specs to registries verbatim)
+  and are bumped in every release PR by release-please's `node-workspace`
+  plugin (`merge: false`, paired with `linked-versions`). Private
+  `examples/*` keep `workspace:*` so they always link the local packages.
 - A new publishable package must be registered in both release-please files:
   `packages` + the `linked-versions` `components` list in the config (same
   component name in both), and the manifest.
@@ -62,6 +67,9 @@ Release automation is release-plz-style, built on release-please
   `noUncheckedIndexedAccess`.
 - **Formatting is oxfmt**: 4-space indent, `sortImports: true` (imports get
   reordered automatically).
+- **Inter-package deps under `packages/` are exact pins** (e.g. `"0.1.0"`),
+  bumped automatically in release PRs. `workspace:*` is for `examples/*`
+  only — never use it in a publishable package.
 - **TypeScript is v7** (native/tsgo-era). Do not assume tsc v5 behavior.
 - **Node version is pinned** in `.node-version` (provisioned by nub /
   `nubjs/setup-nub` in CI).

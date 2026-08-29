@@ -179,7 +179,7 @@ importers:
   packages/core/console:
     dependencies:
       '@lambdot/core':
-        specifier: workspace:*
+        specifier: 0.1.0
         version: link:../core
 
   packages/core/core: {}
@@ -187,28 +187,28 @@ importers:
   packages/core/env:
     dependencies:
       '@lambdot/core':
-        specifier: workspace:*
+        specifier: 0.1.0
         version: link:../core
 
   packages/core/websocket:
     dependencies:
       '@lambdot/core':
-        specifier: workspace:*
+        specifier: 0.1.0
         version: link:../core
 
   packages/host/cloudflare:
     dependencies:
       '@lambdot/core':
-        specifier: workspace:*
+        specifier: 0.1.0
         version: link:../../core/core
 
   packages/protocol/qq:
     dependencies:
       '@lambdot/core':
-        specifier: workspace:*
+        specifier: 0.1.0
         version: link:../../core/core
       '@lambdot/websocket':
-        specifier: workspace:*
+        specifier: 0.1.0
         version: link:../../core/websocket
       tweetnacl:
         specifier: ^1.0.3
@@ -217,13 +217,13 @@ importers:
   packages/state/memory:
     dependencies:
       '@lambdot/core':
-        specifier: workspace:*
+        specifier: 0.1.0
         version: link:../../core/core
 
   packages/state/sqlite:
     dependencies:
       '@lambdot/core':
-        specifier: workspace:*
+        specifier: 0.1.0
         version: link:../../core/core
 
 packages:
