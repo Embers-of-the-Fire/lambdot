@@ -1,8 +1,10 @@
+import type { ConsoleReply } from "@lambdot/console";
 import { consolePlatform } from "@lambdot/console";
-import { createKernel } from "@lambdot/core";
+import type { Command } from "@lambdot/core";
+import { createKernel, filterStream } from "@lambdot/core";
 import { wsPlatform } from "@lambdot/websocket";
 
-import { echoSpec } from "./echo-spec.ts";
+import { echoSpec, type WsEchoAddress } from "./echo-spec.ts";
 import { echo } from "./echo.ts";
 import { startEchoServer } from "./server.ts";
 
@@ -10,19 +12,34 @@ const server = await startEchoServer(8080);
 const url = `ws://127.0.0.1:${server.port}`;
 
 const cli = consolePlatform();
-const wsecho = wsPlatform("ws", echoSpec);
+const wsecho = wsPlatform("wsecho", echoSpec);
 
-// One kernel, two platforms: console (stdin/stdout) and websocket. The
-// shared `echo` feature must come last — the type fold requires every event
-// kind it handles and every output platform it sends through to be
-// registered first.
+// One composition, two platforms: console (stdin/stdout) and websocket. The
+// shared `echo` feature identity-wires (both message streams are visible
+// namespaces); each output's mapping filters the merged command stream down
+// to its own platform tag.
 const kernel = createKernel()
-    .use(cli.input)
-    .use(cli.output)
-    .use(wsecho.transport, { url })
-    .use(wsecho.input)
-    .use(wsecho.output)
-    .use(echo);
+    .use(cli.lines)
+    .bind(wsecho.transport, { option: { url } })
+    .use(wsecho.input, { mapping: (ctx) => ({ connection: ctx["wsecho/transport"] }) })
+    .use(echo)
+    .bind(cli.printer, {
+        mapping: (ctx) => ({
+            replies: filterStream(
+                ctx.echo,
+                (cmd): cmd is ConsoleReply => cmd.address.platform === "console",
+            ),
+        }),
+    })
+    .bind(wsecho.output, {
+        mapping: (ctx) => ({
+            connection: ctx["wsecho/transport"],
+            commands: filterStream(
+                ctx.echo,
+                (cmd): cmd is Command<WsEchoAddress, string> => cmd.address.platform === "wsecho",
+            ),
+        }),
+    });
 
 await kernel.start();
 
@@ -62,8 +79,8 @@ if (received !== "echo: hello from driver") {
 console.log("multi-echo-bot: websocket leg OK");
 console.log("console echo is live — type a line and press enter (Ctrl+C to quit)");
 
-// The console leg is interactive; the kernel keeps serving both platforms
-// until interrupted.
+// The console leg is interactive; the composition keeps serving both
+// platforms until interrupted.
 process.on("SIGINT", () => {
     void kernel
         .stop()

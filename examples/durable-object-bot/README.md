@@ -3,8 +3,8 @@
 A chat-room bot embedded in a Cloudflare **Durable Object** — the websocket
 counterpart of [`../cloudflare-bot`](../cloudflare-bot): each room name maps
 to one Durable Object instance, which accepts the room's websocket clients
-into a hub and drives them with a kernel, with the room's message counter
-served from the instance's own transactional storage.
+into a hub and drives them with a composition, with the room's message
+counter served from the instance's own transactional storage.
 
 ```console
 $ nub run -F @lambdot-example/durable-object-bot start
@@ -26,49 +26,55 @@ integration test, exiting non-zero on any wrong frame.
 
 1. **A `wsHub` in place of `wsTransport`.** `wsTransport` (see
    [`../websocket-bot`](../websocket-bot)) dials out: one client socket,
-   provided as a `WsConnection` capability. A Durable Object is the mirror
-   image — it _accepts_ sockets — so `wsHub("room")` from
-   `@lambdot/host-cloudflare` provides a hub with the exact `WsConnection`
+   emitted as a `WsConnection` namespace value. A Durable Object is the
+   mirror image — it _accepts_ sockets — so `wsHub("room")` from
+   `@lambdot/host-cloudflare` emits a hub with the exact `WsConnection`
    shape instead, and the generic `wsPlatform` input/output halves drive it
-   unchanged. The difference is fan-out: the hub's `send` broadcasts to every
-   accepted socket, so one frame from client A reaches client B too.
-2. **A kernel per Durable Object instance.** The `ChatRoom` class boots its
-   kernel lazily on the first upgrade (`start` is idempotent) and accepts the
-   server end of each `WebSocketPair` into the hub afterwards. The platform
-   bundle is created _inside_ `createRoomKernel`, not at module scope:
-   `wsOutput` keeps its connection in the bundle's closure, and all instances
-   of a Durable Object class share one isolate — a shared bundle would
-   cross-wire their sockets (workerd rejects it: "Cannot perform I/O on
-   behalf of a different Durable Object").
+   unchanged, wired by `mapping: (ctx) => ({ connection: ctx.room })`. The
+   difference is fan-out: the hub's `send` broadcasts to every accepted
+   socket, so one frame from client A reaches client B too.
+2. **A composition per Durable Object instance.** The `ChatRoom` class boots
+   its composition lazily on the first upgrade (`start` is idempotent) and
+   accepts the server end of each `WebSocketPair` into the hub afterwards.
+   The hub is held in instance state, not at module scope: it keeps the
+   room's sockets and listeners in closures, and all instances of a Durable
+   Object class share one isolate — a shared hub would cross-wire their
+   sockets (workerd rejects it: "Cannot perform I/O on behalf of a different
+   Durable Object"). The plugin objects themselves are pure specs and would
+   be safe to share; the hub is what must stay per-instance.
 3. **Per-instance state with `doState()`.** The `reply` feature counts
-   messages through `ctx.state.for("reply")`, served from the instance's
-   transactional storage — passed to the kernel factory and straight on as
-   config (`.use(doState(), { storage })`), since a Durable Object's storage
-   arrives on its constructor state, not on `env`. Two rooms
-   on one namespace never share a value: "other" starts its counter at zero
-   while "lobby" is at two.
-4. **The namespace binding as a capability.** The worker's fetch handler is
-   a router: `durableObjectNamespace("rooms")` provides the binding through a
-   small per-isolate kernel, so the route reads
+   messages through a `StateBackend` served from the instance's
+   transactional storage — passed to the composition as config
+   (`.bind(doState(), { option: { storage } })`), since a Durable Object's
+   storage arrives on its constructor state, not on `env`. The feature
+   identity-wires `{ state: StateBackend }` and builds a typed accessor with
+   `createStateAccessor(input.state, "reply")`. Two rooms on one namespace
+   never share a value: "other" starts its counter at zero while "lobby" is
+   at two.
+4. **The namespace binding as a typed namespace value.** The worker's fetch
+   handler is a router: `durableObjectNamespace("rooms")` emits the binding
+   through a small per-isolate composition, so the route reads
    `router.ctx.rooms.get(router.ctx.rooms.idFromName(name)).fetch(request)`
-   typed by the fold — the same bindings-as-capabilities model as
+   typed by the composition — the same bindings-as-namespaces model as
    cloudflare-bot's KV namespace.
 
 ## The plugin chain
 
 ```ts
 function createRoomKernel(room: WsHub<"room">, url: string, storage: DurableObjectStorage) {
-    const chat = wsPlatform("room", chatSpec); // per-instance, see above
+    const chat = wsPlatform("dochat", chatSpec);
     return createKernel()
-        .use(room.plugin, { url }) // provides the hub as the "room" capability
-        .use(chat.input) // hub frames -> "dochat.message" events
-        .use(chat.output) // ctx.send -> hub broadcast
-        .use(doState(), { storage }) // serves ctx.state from the instance's storage
-        .use(reply); // counts, echoes
+        .bind(room.plugin, { option: { url } }) // the hub as internal "room" namespace
+        .use(chat.input, { mapping: (ctx) => ({ connection: ctx.room }) }) // hub frames -> stream
+        .bind(doState(), { option: { storage } }) // "state" from the instance's storage
+        .use(reply) // identity wiring on { dochat, state }: counts, echoes
+        .bind(chat.output, {
+            mapping: (ctx) => ({ connection: ctx.room, commands: ctx.reply }),
+        });
 }
 ```
 
-The Durable Object handler is plain worker code around that kernel —
+The Durable Object handler is plain worker code around that composition —
 extending the `DurableObject` base class from the built-in
 `cloudflare:workers` module (the documented shape; workerd resolves the
 import at runtime, esbuild leaves it external, and its `ctx`/`env` are
@@ -95,8 +101,8 @@ export class ChatRoom extends DurableObject<Env> {
 
 | File                      | Role                                                                              |
 | ------------------------- | --------------------------------------------------------------------------------- |
-| `worker.ts`               | The worker: `ChatRoom` Durable Object, per-instance kernel, room router.          |
-| `chat-spec.ts`            | The platform spec: plain-text frames, one `dochat.message` event kind.            |
+| `worker.ts`               | The worker: `ChatRoom` Durable Object, per-instance composition, room router.     |
+| `chat-spec.ts`            | The platform spec: plain-text frames over the room's broadcast channel.           |
 | `cloudflare-workers.d.ts` | The local type declaration for the `cloudflare:workers` built-in module.          |
 | `index.ts`                | The driver: esbuild bundle, miniflare with the DO namespace, self-checking rooms. |
 

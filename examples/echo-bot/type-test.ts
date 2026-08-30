@@ -1,53 +1,65 @@
 /**
- * Compile-time assertions for the kernel's generic fold. Run by `typecheck`;
- * every `@ts-expect-error` must stay a genuine error.
+ * Compile-time assertions for the composition model: namespace visibility,
+ * identity wiring vs. required mappings, and duplicate rejection. Run by
+ * typecheck; every `@ts-expect-error` must stay a genuine error.
  */
-import {
-    consolePlatform,
-    type ConsoleAddress,
-    type ConsoleEvents,
-    type ConsoleOutputs,
-} from "@lambdot/console";
-import { createKernel, definePlugin } from "@lambdot/core";
+import { consolePlatform, type ConsoleLine, type ConsoleReply } from "@lambdot/console";
+import type { Stream } from "@lambdot/core";
+import { createKernel, definePlugin, mapStream } from "@lambdot/core";
 
-const echo = definePlugin<ConsoleEvents, ConsoleOutputs>({
+const echo = definePlugin({
     name: "echo",
-    apply(ctx) {
-        return ctx.on("console.line", (event) => {
-            // payload is typed string
-            const text: string = event.payload;
-            // address is typed ConsoleAddress
-            const address: ConsoleAddress = event.address;
-            return ctx.send(address, `echo: ${text}`);
-        });
+    apply(input: { "console/lines": Stream<ConsoleLine> }) {
+        return mapStream(input["console/lines"], (event) => ({
+            address: event.address,
+            content: `echo: ${event.payload}`,
+        }));
     },
 });
 
 const cli = consolePlatform();
 
-const kernel = createKernel().use(cli.input).use(cli.output).use(echo);
+const kernel = createKernel()
+    .use(cli.lines)
+    .use(echo)
+    .bind(cli.printer, { mapping: (ctx) => ({ replies: ctx.echo }) });
 
-// send rejects content that doesn.t match the platform's contract
-void kernel.ctx.send({ platform: "console", target: "stdout" }, "ok");
-// @ts-expect-error console content is string, not an object
-void kernel.ctx.send({ platform: "console", target: "stdout" }, { text: "nope" });
+// the exposed namespaces are typed on the composition's ctx
+const lines: Stream<ConsoleLine> = kernel.ctx["console/lines"];
+const replies: Stream<ConsoleReply> = kernel.ctx.echo;
+void lines;
+void replies;
 
-// send rejects addresses of unregistered platforms
-// @ts-expect-error no "discord" output is registered
-void kernel.ctx.send({ platform: "discord", channel: "123" }, "hello");
+// bound namespaces are hidden from the final ctx
+// @ts-expect-error the printer was bound, not used
+void kernel.ctx["console/printer"];
 
-// handlers can only subscribe to registered event kinds
-// @ts-expect-error "message.create" was never registered by an input
-void kernel.ctx.on("message.create", () => {});
-
-// state is unavailable when no plugin declared a schema
-// @ts-expect-error ctx.state is NoStateDeclared — stateless by default
-void kernel.ctx.state.for("echo");
-
-// registration order is enforced: echo needs console.line + console output
-// @ts-expect-error unregistered event kinds / output platforms
+// identity wiring only works when the declared input is already visible;
+// otherwise the mapping becomes a required argument
+// @ts-expect-error echo needs "console/lines"; the empty kernel does not have it
 void createKernel().use(echo);
 
-// registering the output before the input still gates on the missing kind
-// @ts-expect-error unregistered event kinds
-void createKernel().use(cli.output).use(echo);
+// @ts-expect-error no "replies" namespace exists to identity-wire the printer
+void createKernel().use(cli.lines).use(cli.printer);
+
+// mappings are checked against the visible ctx: missing namespaces error
+void createKernel()
+    .use(cli.lines)
+    .use(cli.printer, {
+        // @ts-expect-error "echo" is not composed yet
+        mapping: (ctx) => ({ replies: ctx.echo }),
+    });
+
+// mappings must feed the declared input with compatible types
+void createKernel()
+    .use(cli.lines)
+    .use(cli.printer, {
+        // @ts-expect-error the printer wants Stream<ConsoleReply>, not the line stream
+        mapping: (ctx) => ({ replies: ctx["console/lines"] }),
+    });
+
+// duplicate namespaces are rejected
+void createKernel()
+    .use(cli.lines)
+    // @ts-expect-error "console/lines" is already taken
+    .use(cli.lines);

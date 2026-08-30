@@ -1,27 +1,25 @@
-import type { FeaturePlugin, InputPlugin, OutputPlugin } from "@lambdot/core";
-import type { WsCapability } from "@lambdot/websocket";
+import type { Plugin } from "@lambdot/core";
+import type { WsConnection } from "@lambdot/websocket";
 
-import { qqApi, type QqApiConfig, type QqCapability } from "./api.ts";
-import type { QqEnvNeeds } from "./credentials.ts";
-import type { QqAddress, QqEvents } from "./events.ts";
+import { qqApi, type QqApi, type QqApiConfig } from "./api.ts";
+import type { QqCommandStream, QqMessageStream } from "./events.ts";
 import { qqGatewayInput, qqGatewayTransport, type QqGatewayInputConfig } from "./gateway.ts";
 import { qqOutput } from "./output.ts";
-import { qqWebhookInput, type QqWebhookCapability, type QqWebhookConfig } from "./webhook.ts";
+import { qqWebhook, type QqWebhook, type QqWebhookConfig } from "./webhook.ts";
 
-export { qqApi, type QqApi, type QqApiConfig, type QqCapability } from "./api.ts";
+export { qqApi, type QqApi, type QqApiConfig } from "./api.ts";
 export {
     DEFAULT_QQ_CREDENTIAL_KEYS,
     readQqCredentials,
     type QqCredentialKeys,
     type QqCredentials,
-    type QqEnvNeeds,
 } from "./credentials.ts";
 export {
     decodeMessageEvent,
     type QqAddress,
-    type QqEvents,
+    type QqCommandStream,
     type QqMessage,
-    type QqOutputs,
+    type QqMessageStream,
 } from "./events.ts";
 export {
     QQ_INTENT_GROUP_AND_C2C,
@@ -30,150 +28,107 @@ export {
     type QqGatewayInputConfig,
 } from "./gateway.ts";
 export { qqOutput } from "./output.ts";
-export {
-    qqWebhookInput,
-    type QqWebhook,
-    type QqWebhookCapability,
-    type QqWebhookConfig,
-} from "./webhook.ts";
+export { qqWebhook, type QqWebhook, type QqWebhookConfig } from "./webhook.ts";
 
 /**
- * One qq platform over the websocket gateway, bundled: the REST client, the
- * gateway transport that discovers the socket URL through it, the receiving
- * input, and the shared output. The pieces stay separate (rather than one
- * fused plugin) so the type fold can keep enforcing registration order:
- * env provider → api → transport → input → output → features.
- *
+ * One qq platform over the websocket gateway, bundled as leaves. The api and
+ * transport are internal wiring (compose them with `bind`); the input's
+ * message stream is exposed under the platform name (compose with `use`).
+ * The output is terminal, so it is always wired last:
+
  * ```ts
- * const qq = qqGatewayPlatform({ ws: "qq-ws", api: "qq-api", env: "qq-env" });
+ * const qq = qqGatewayPlatform("qq");
  * createKernel()
  *     .use(envVars("qq-env", ["QQ_BOT_APP_ID", "QQ_BOT_APP_SECRET"]))
- *     .use(qq.api, {})
- *     .use(qq.transport)
- *     .use(qq.input, {})
- *     .use(qq.output);
+ *     .bind(qq.api, { option: {}, mapping: (ctx) => ({ env: ctx["qq-env"] }) })
+ *     .bind(qq.transport, { mapping: (ctx) => ({ api: ctx["qq/api"] }) })
+ *     .use(qq.input, {
+ *         option: {},
+ *         mapping: (ctx) => ({ connection: ctx["qq/transport"], api: ctx["qq/api"] }),
+ *     })
+ *     .use(reply, { mapping: (ctx) => ({ messages: ctx.qq }) })
+ *     .bind(qq.output, { mapping: (ctx) => ({ api: ctx["qq/api"], commands: ctx.reply }) });
  * ```
  */
-export interface QqGatewayPlatform<
-    TWsCap extends string,
-    TApiCap extends string,
-    TEnvCap extends string,
-> {
-    readonly api: FeaturePlugin<
-        {},
-        {},
-        undefined,
+export interface QqGatewayPlatform<TName extends string> {
+    readonly api: Plugin<
+        { env: Readonly<Record<string, string>> },
+        QqApi,
         QqApiConfig,
-        `qq-api:${TApiCap}`,
-        QqCapability<TApiCap>,
-        QqEnvNeeds<TEnvCap>
+        `${TName}/api`
     >;
-    readonly transport: FeaturePlugin<
-        {},
-        {},
-        undefined,
-        void,
-        `qq-gateway-transport:${TWsCap}`,
-        WsCapability<TWsCap>,
-        QqCapability<TApiCap>
-    >;
-    readonly input: InputPlugin<
-        QqEvents,
+    readonly transport: Plugin<{ api: QqApi }, WsConnection, void, `${TName}/transport`>;
+    readonly input: Plugin<
+        { connection: WsConnection; api: QqApi },
+        QqMessageStream,
         QqGatewayInputConfig,
-        "qq-gateway-input",
-        {},
-        WsCapability<TWsCap> & QqCapability<TApiCap>
+        TName
     >;
-    readonly output: OutputPlugin<
-        "qq",
-        QqAddress,
-        string,
+    readonly output: Plugin<
+        { api: QqApi; commands: QqCommandStream },
         void,
-        "qq-output",
-        {},
-        QqCapability<TApiCap>
+        void,
+        `${TName}/output`
     >;
 }
 
-/** Build a whole gateway-backed qq platform from its capability names. */
-export function qqGatewayPlatform<
-    TWsCap extends string,
-    TApiCap extends string,
-    TEnvCap extends string,
->(capabilities: {
-    readonly ws: TWsCap;
-    readonly api: TApiCap;
-    readonly env: TEnvCap;
-}): QqGatewayPlatform<TWsCap, TApiCap, TEnvCap> {
+/** Build a whole gateway-backed qq platform under one name. */
+export function qqGatewayPlatform<const TName extends string>(
+    name: TName,
+): QqGatewayPlatform<TName> {
     return {
-        api: qqApi(capabilities.api, capabilities.env),
-        transport: qqGatewayTransport(capabilities.ws, capabilities.api),
-        input: qqGatewayInput(capabilities.ws, capabilities.api),
-        output: qqOutput(capabilities.api),
+        api: qqApi(`${name}/api`),
+        transport: qqGatewayTransport(`${name}/transport`),
+        input: qqGatewayInput(name),
+        output: qqOutput(`${name}/output`),
     };
 }
 
 /**
- * One qq platform over the webhook (reversed-post) infra, bundled: the
- * webhook input that provides the callback-handler capability, the REST
- * client, and the output. Registration order: env provider → webhook → api →
- * output → features.
- *
+ * One qq platform over the webhook (reversed-post) infra, bundled as leaves.
+ * The webhook is exposed under the platform name — its `handle` serves the
+ * HTTP callback route, its `messages` stream feeds the features. The api is
+ * internal wiring; the output is terminal:
+
  * ```ts
- * const qq = qqWebhookPlatform({ webhook: "qq-webhook", api: "qq-api", env: "qq-env" });
+ * const qq = qqWebhookPlatform("qq");
  * createKernel()
  *     .use(envVars("qq-env", ["QQ_BOT_APP_ID", "QQ_BOT_APP_SECRET"]))
- *     .use(qq.webhook, {})
- *     .use(qq.api, {})
- *     .use(qq.output);
- * // in the hono route: return kernel.ctx["qq-webhook"].handle(c.req.raw);
+ *     .use(qq.webhook, { option: {}, mapping: (ctx) => ({ env: ctx["qq-env"] }) })
+ *     .bind(qq.api, { option: {}, mapping: (ctx) => ({ env: ctx["qq-env"] }) })
+ *     .use(reply, { mapping: (ctx) => ({ messages: ctx.qq.messages }) })
+ *     .bind(qq.output, { mapping: (ctx) => ({ api: ctx["qq/api"], commands: ctx.reply }) });
+ * // in the hono route: return kernel.ctx.qq.handle(c.req.raw);
  * ```
  */
-export interface QqWebhookPlatform<
-    TCap extends string,
-    TApiCap extends string,
-    TEnvCap extends string,
-> {
-    readonly webhook: InputPlugin<
-        QqEvents,
+export interface QqWebhookPlatform<TName extends string> {
+    readonly webhook: Plugin<
+        { env: Readonly<Record<string, string>> },
+        QqWebhook,
         QqWebhookConfig,
-        `qq-webhook:${TCap}`,
-        QqWebhookCapability<TCap>,
-        QqEnvNeeds<TEnvCap>
+        TName
     >;
-    readonly api: FeaturePlugin<
-        {},
-        {},
-        undefined,
+    readonly api: Plugin<
+        { env: Readonly<Record<string, string>> },
+        QqApi,
         QqApiConfig,
-        `qq-api:${TApiCap}`,
-        QqCapability<TApiCap>,
-        QqEnvNeeds<TEnvCap>
+        `${TName}/api`
     >;
-    readonly output: OutputPlugin<
-        "qq",
-        QqAddress,
-        string,
+    readonly output: Plugin<
+        { api: QqApi; commands: QqCommandStream },
         void,
-        "qq-output",
-        {},
-        QqCapability<TApiCap>
+        void,
+        `${TName}/output`
     >;
 }
 
-/** Build a whole webhook-backed qq platform from its capability names. */
-export function qqWebhookPlatform<
-    TCap extends string,
-    TApiCap extends string,
-    TEnvCap extends string,
->(capabilities: {
-    readonly webhook: TCap;
-    readonly api: TApiCap;
-    readonly env: TEnvCap;
-}): QqWebhookPlatform<TCap, TApiCap, TEnvCap> {
+/** Build a whole webhook-backed qq platform under one name. */
+export function qqWebhookPlatform<const TName extends string>(
+    name: TName,
+): QqWebhookPlatform<TName> {
     return {
-        webhook: qqWebhookInput(capabilities.webhook, capabilities.env),
-        api: qqApi(capabilities.api, capabilities.env),
-        output: qqOutput(capabilities.api),
+        webhook: qqWebhook(name),
+        api: qqApi(`${name}/api`),
+        output: qqOutput(`${name}/output`),
     };
 }

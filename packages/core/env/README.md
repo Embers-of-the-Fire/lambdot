@@ -1,69 +1,63 @@
 # @lambdot/env
 
-Reads variables from `process.env` into a typed capability, so deployments
+Reads variables from `process.env` into a typed namespace, so deployments
 pass configuration through the environment and plugins consume it through
-the kernel's capability fold — with the provider-before-consumer ordering
-checked at compile time.
+the composition's visible context — with the provider-before-consumer
+ordering checked at compile time.
 
 ## What it provides
 
-- **A capability contract.** `EnvCapability<TCap, TKey>` maps the capability
-  name to a snapshot of the requested variables:
-  `{ readonly [K in TCap]: Readonly<Record<TKey, string>> }`. The provider
-  declares it as `TProvides`, consumers as `TInjects`. The name is a
-  parameter, so instances multiply: two providers fold side by side as
-  `EnvCapability<"qq-env"> & EnvCapability<"discord-env">`, exactly like
-  `WsCapability` in `@lambdot/websocket`.
-- **One plugin factory.** `envVars(capability, keys)` reads each key from
-  `process.env` at kernel start and provides the snapshot under
-  `capability`. A missing or empty variable throws during activation, so a
-  misconfigured deployment fails loudly before any consumer activates.
+- **One plugin factory.** `envVars(name, keys)` reads each key from
+  `process.env` at activation and emits the snapshot —
+  `Readonly<Record<TKey, string>>` — under `name`. A missing or empty
+  variable throws during activation, so a misconfigured deployment fails
+  loudly before any consumer activates.
+- **A typed namespace value.** Because the keys are a type parameter,
+  consumers read `ctx["qq-env"].QQ_BOT_APP_ID` as `string` with no casts.
+  The name is a parameter too, so instances multiply: two providers compose
+  side by side under distinct names, exactly like `wsTransport` in
+  `@lambdot/websocket`.
 
 ## Usage
 
 ```ts
 import { createKernel, definePlugin } from "@lambdot/core";
-import { envVars, type EnvCapability } from "@lambdot/env";
+import { envVars } from "@lambdot/env";
 
-type QqEnv = EnvCapability<"qq-env", "QQ_BOT_APP_ID" | "QQ_BOT_APP_SECRET">;
-
-// typed injection: TInjects folds the snapshot into the apply context
-const report = definePlugin<{}, {}, undefined, void, "report", {}, QqEnv>({
+const report = definePlugin({
     name: "report",
-    apply(ctx) {
-        const appId: string = ctx["qq-env"].QQ_BOT_APP_ID;
-        return () => {};
+    apply(input: { "qq-env": Readonly<Record<"QQ_BOT_APP_ID" | "QQ_BOT_APP_SECRET", string>> }) {
+        const appId: string = input["qq-env"].QQ_BOT_APP_ID;
+        // ...
     },
 });
 
 const kernel = createKernel()
     .use(envVars("qq-env", ["QQ_BOT_APP_ID", "QQ_BOT_APP_SECRET"]))
-    .use(report); // before envVars: compile error, "unprovided capabilities"
+    .use(report); // before envVars: compile error — the mapping's ctx is
+// typed as what's visible so far, and "qq-env" isn't in it
 ```
 
 Consumers may also declare a wider view — any
-`Readonly<Record<string, string>>` under the same capability name — since
-`EnvCapability<TCap, TKey>` narrows the keys but stays assignable to it;
-`@lambdot/protocol-qq`'s `QqEnvNeeds` works this way. Workers have no
+`Readonly<Record<string, string>>` under the same namespace key — since the
+emitted record stays assignable to it; `@lambdot/protocol-qq`'s plugins
+consume `{ env: Readonly<Record<string, string>> }` this way, wired with an
+explicit `mapping: (ctx) => ({ env: ctx["qq-env"] })`. Workers have no
 `process.env`; `@lambdot/host-cloudflare` ships a counterpart `envVars`
-that reads from a worker's bindings object into the same capability shape.
+that reads from a worker's bindings object into the same record shape.
 
 ## API
 
-- `envVars<TCap extends string, TKey extends string>(capability: TCap, keys: readonly TKey[])` —
-  returns a `FeaturePlugin` named `env:<capability>` with
-  `TProvides = EnvCapability<TCap, TKey>` and no config. The snapshot is
-  taken once in `apply` and provided via `ctx.provide`; unloading the
-  plugin withdraws the capability.
-- `EnvCapability<TCap, TKey>` — the shared provider/consumer contract type.
+- `envVars<const TName extends string, const TKey extends string>(name: TName, keys: readonly TKey[])` —
+  returns a `Plugin<void, Readonly<Record<TKey, string>>, void, TName>`. The
+  snapshot is taken once in `apply`; the plugin takes no config.
 
 ## Examples
 
-- [qq-gateway-bot](../../examples/qq-gateway-bot) — `envVars("qq-env", ...)`
-  feeds the qq platform's api plugin; its `type-test.ts` exercises the
-  compile-time gate and the typed readback (`kernel.ctx["qq-env"].QQ_BOT_APP_ID`).
-- [qq-webhook-bot](../../examples/qq-webhook-bot) — the same capability
-  wiring over webhooks.
+- [qq-gateway-bot](../../../examples/qq-gateway-bot) — `envVars("qq-env", ...)`
+  feeds the qq platform's api plugin through its `mapping`.
+- [qq-webhook-bot](../../../examples/qq-webhook-bot) — the same env wiring over
+  webhooks.
 
 ## License
 

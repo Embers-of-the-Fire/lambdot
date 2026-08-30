@@ -1,4 +1,5 @@
-import type { Disposer, FeaturePlugin, StateBackend } from "@lambdot/core";
+import type { Plugin, StateBackend } from "@lambdot/core";
+import { definePlugin } from "@lambdot/core";
 
 import type { D1Database, KVNamespace, KVPutOptions, R2Bucket } from "./bindings.ts";
 
@@ -26,40 +27,14 @@ export type {
     R2PutValue,
 } from "./bindings.ts";
 export type {
-    DoCapability,
     DoStorageConfig,
     DurableObjectNamespaceConfig,
     WebSocketHub,
     WebSocketHubControl,
     WsHub,
-    WsHubCapability,
     WsHubConfig,
 } from "./durable-object.ts";
 export { doState, durableObjectNamespace, wsHub } from "./durable-object.ts";
-
-/**
- * The typed capability contracts shared by a binding provider and its
- * consumers, parameterized by capability name: the provider declares it as
- * `TProvides`, consumers as `TInjects`. Cloudflare bindings are named — a
- * worker binds several KV namespaces, D1 databases, and R2 buckets under
- * distinct names — so each provider instance takes its own capability name
- * and distinct names fold side by side
- * (`KVCapability<"sessions"> & KVCapability<"cache">`), exactly like
- * `WsCapability` in `@lambdot/websocket`.
- */
-export type KVCapability<TCap extends string> = { readonly [K in TCap]: KVNamespace };
-export type D1Capability<TCap extends string> = { readonly [K in TCap]: D1Database };
-export type R2Capability<TCap extends string> = { readonly [K in TCap]: R2Bucket };
-
-/**
- * The typed capability contract shared by an environment provider and its
- * consumers — the same shape as `EnvCapability` in `@lambdot/env`, declared
- * locally so the package stays dependency-free. The two are structurally
- * identical, so a consumer typed against either accepts both providers.
- */
-export type EnvCapability<TCap extends string, TKey extends string> = {
-    readonly [K in TCap]: Readonly<Record<TKey, string>>;
-};
 
 /** Config for {@link kvNamespace}: the binding as it arrives on the worker's `env`. */
 export interface KVNamespaceConfig {
@@ -86,151 +61,129 @@ export interface EnvVarsConfig {
 }
 
 /**
- * Provide one named Workers KV namespace as a typed capability. Instances
- * multiply by capability name: register `kvNamespace("sessions")` and
- * `kvNamespace("cache")` side by side, and each consumer injects its own.
+ * Emit one named Workers KV namespace as the plugin's namespace value.
+ * Instances multiply by name: compose `kvNamespace("sessions")` and
+ * `kvNamespace("cache")` side by side, and each consumer wires its own
+ * through its mapping.
  *
  * ```ts
  * createKernel()
- *     .use(kvNamespace("sessions"), { binding: env.SESSIONS })
- *     .use(kvNamespace("cache"), { binding: env.CACHE });
+ *     .use(kvNamespace("sessions"), { option: { binding: env.SESSIONS } })
+ *     .use(kvNamespace("cache"), { option: { binding: env.CACHE } });
  * // ctx.sessions: KVNamespace, ctx.cache: KVNamespace
  * ```
  */
-export function kvNamespace<TCap extends string>(
+export function kvNamespace<const TCap extends string>(
     capability: TCap,
-): FeaturePlugin<{}, {}, undefined, KVNamespaceConfig, `kv:${TCap}`, KVCapability<TCap>> {
-    return {
-        name: `kv:${capability}`,
-        apply(ctx, config) {
-            // The kernel's `provide` keeps its value parameter behind a
-            // conditional type that stays deferred for a generic capability
-            // name; `KVCapability<TCap>` already ties this name to
-            // `KVNamespace`, so pin the call down here.
-            return (ctx.provide as (name: TCap, value: KVNamespace) => Disposer).call(
-                ctx,
-                capability,
-                config.binding,
-            );
+): Plugin<void, KVNamespace, KVNamespaceConfig, TCap> {
+    return definePlugin({
+        name: capability,
+        apply(_input, _scope, config) {
+            return config.binding;
         },
-    };
+    });
 }
 
 /**
- * Provide one named D1 database as a typed capability. Instances multiply
- * by capability name, exactly like {@link kvNamespace}.
+ * Emit one named D1 database as the plugin's namespace value. Instances
+ * multiply by name, exactly like {@link kvNamespace}.
  *
  * ```ts
- * createKernel().use(d1Database("db"), { binding: env.DB });
+ * createKernel().use(d1Database("db"), { option: { binding: env.DB } });
  * // ctx.db: D1Database
  * ```
  */
-export function d1Database<TCap extends string>(
+export function d1Database<const TCap extends string>(
     capability: TCap,
-): FeaturePlugin<{}, {}, undefined, D1DatabaseConfig, `d1:${TCap}`, D1Capability<TCap>> {
-    return {
-        name: `d1:${capability}`,
-        apply(ctx, config) {
-            // See `kvNamespace` for why `provide` is pinned here.
-            return (ctx.provide as (name: TCap, value: D1Database) => Disposer).call(
-                ctx,
-                capability,
-                config.binding,
-            );
+): Plugin<void, D1Database, D1DatabaseConfig, TCap> {
+    return definePlugin({
+        name: capability,
+        apply(_input, _scope, config) {
+            return config.binding;
         },
-    };
+    });
 }
 
 /**
- * Provide one named R2 bucket as a typed capability. Instances multiply by
- * capability name, exactly like {@link kvNamespace}.
+ * Emit one named R2 bucket as the plugin's namespace value. Instances
+ * multiply by name, exactly like {@link kvNamespace}.
  *
  * ```ts
- * createKernel().use(r2Bucket("uploads"), { binding: env.UPLOADS });
+ * createKernel().use(r2Bucket("uploads"), { option: { binding: env.UPLOADS } });
  * // ctx.uploads: R2Bucket
  * ```
  */
-export function r2Bucket<TCap extends string>(
+export function r2Bucket<const TCap extends string>(
     capability: TCap,
-): FeaturePlugin<{}, {}, undefined, R2BucketConfig, `r2:${TCap}`, R2Capability<TCap>> {
-    return {
-        name: `r2:${capability}`,
-        apply(ctx, config) {
-            // See `kvNamespace` for why `provide` is pinned here.
-            return (ctx.provide as (name: TCap, value: R2Bucket) => Disposer).call(
-                ctx,
-                capability,
-                config.binding,
-            );
+): Plugin<void, R2Bucket, R2BucketConfig, TCap> {
+    return definePlugin({
+        name: capability,
+        apply(_input, _scope, config) {
+            return config.binding;
         },
-    };
+    });
 }
 
 /**
- * Read variables from a worker's bindings object and provide them as a
- * typed capability — the Cloudflare counterpart of `envVars` in
+ * Read variables from a worker's bindings object and emit them as the
+ * plugin's namespace value — the Cloudflare counterpart of `envVars` in
  * `@lambdot/env`: workers have no `process.env`, so plain vars and secrets
  * arrive on `env` next to the resource bindings. A missing, empty, or
- * non-string variable fails activation loudly at kernel start, so a
- * misconfigured deployment surfaces before any consumer activates.
+ * non-string variable fails activation loudly at start, so a misconfigured
+ * deployment surfaces before any consumer activates.
  *
  * ```ts
- * createKernel().use(envVars("bot-env", ["BOT_TOKEN"]), { source: env });
+ * createKernel().use(envVars("bot-env", ["BOT_TOKEN"]), { option: { source: env } });
  * // ctx["bot-env"].BOT_TOKEN: string
  * ```
  */
-export function envVars<TCap extends string, TKey extends string>(
+export function envVars<const TCap extends string, const TKey extends string>(
     capability: TCap,
     keys: readonly TKey[],
-): FeaturePlugin<{}, {}, undefined, EnvVarsConfig, `env:${TCap}`, EnvCapability<TCap, TKey>> {
-    return {
-        name: `env:${capability}`,
-        apply(ctx, config) {
+): Plugin<void, Readonly<Record<TKey, string>>, EnvVarsConfig, TCap> {
+    return definePlugin({
+        name: capability,
+        apply(_input, _scope, config) {
             const values: Record<string, string> = {};
             for (const key of keys) {
                 const value = config.source[key];
                 if (typeof value !== "string" || value === "")
                     throw new Error(
-                        `env:${capability}: required environment variable "${key}" is not set`,
+                        `${capability}: required environment variable "${key}" is not set`,
                     );
                 values[key] = value;
             }
-            // See `kvNamespace` for why `provide` is pinned here.
-            return (
-                ctx.provide as (name: TCap, value: Readonly<Record<TKey, string>>) => Disposer
-            ).call(ctx, capability, values as Readonly<Record<TKey, string>>);
+            return values as Readonly<Record<TKey, string>>;
         },
-    };
+    });
 }
 
 /**
- * Bridge a named Workers KV namespace into the framework's pluggable state
- * slot, so feature plugins reach it through `ctx.state`. Injects the
- * capability provided by {@link kvNamespace} — the fold enforces
- * registration order at compile time:
+ * Bridge a Workers KV namespace into a pluggable `StateBackend`, so stateful
+ * features can build typed accessors with `createStateAccessor`. Wire the KV
+ * binding through the mapping:
  *
  * ```ts
  * createKernel()
- *     .use(kvNamespace("kv"), { binding: env.BOT_KV })
- *     .use(kvState("kv"))
- *     .use(myStatefulFeature);
+ *     .bind(kvNamespace("pings"), { option: { binding: env.PINGS } })
+ *     .use(kvState("state"), { mapping: (ctx) => ({ kv: ctx.pings }) })
+ *     .use(myStatefulFeature); // declares { state: StateBackend } — identity wiring
  * ```
  *
  * Values are stored as JSON under `<plugin-namespace>:<key>`. KV expiries
  * are whole seconds with a 60-second minimum, so `ttlMs` is rounded up and
  * clamped to that floor.
  */
-export function kvState<TCap extends string>(
+export function kvState<const TCap extends string>(
     capability: TCap,
-): FeaturePlugin<{}, {}, undefined, void, `state-kv:${TCap}`, {}, KVCapability<TCap>> {
-    return {
-        name: `state-kv:${capability}`,
-        inject: [capability],
-        apply(ctx) {
-            const binding = ctx[capability];
+): Plugin<{ kv: KVNamespace }, StateBackend, void, TCap> {
+    return definePlugin({
+        name: capability,
+        apply(input) {
+            const { kv } = input;
             const backend: StateBackend = {
                 async get(ns, key) {
-                    const value = await binding.get(`${ns}:${key}`, { type: "json" });
+                    const value = await kv.get(`${ns}:${key}`, { type: "json" });
                     return value === null ? undefined : value;
                 },
                 async set(ns, key, value, ttlMs) {
@@ -238,13 +191,13 @@ export function kvState<TCap extends string>(
                         ttlMs === undefined
                             ? {}
                             : { expirationTtl: Math.max(60, Math.ceil(ttlMs / 1000)) };
-                    await binding.put(`${ns}:${key}`, JSON.stringify(value), options);
+                    await kv.put(`${ns}:${key}`, JSON.stringify(value), options);
                 },
                 async delete(ns, key) {
-                    await binding.delete(`${ns}:${key}`);
+                    await kv.delete(`${ns}:${key}`);
                 },
             };
-            return ctx.provide("state", backend);
+            return backend;
         },
-    };
+    });
 }

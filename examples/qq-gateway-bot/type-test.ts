@@ -1,80 +1,76 @@
 /**
  * Compile-time assertions for the qq gateway platform, mirroring
- * websocket-bot/type-test.ts: the fold and the registration gate must keep
- * working through the bundled capability names — env → api → transport →
- * input → output.
+ * websocket-bot/type-test.ts: mapping-based wiring through the bundle —
+ * env → api → transport → input → reply → output.
  */
-import { createKernel, definePlugin } from "@lambdot/core";
+import { createKernel, definePlugin, mapStream } from "@lambdot/core";
 import { envVars } from "@lambdot/env";
-import { qqGatewayPlatform, type QqApi, type QqEvents, type QqOutputs } from "@lambdot/protocol-qq";
-import type { WsConnection } from "@lambdot/websocket";
+import { qqGatewayPlatform, type QqMessageStream } from "@lambdot/protocol-qq";
 
-const reply = definePlugin<QqEvents, QqOutputs>({
+const reply = definePlugin({
     name: "reply",
-    apply(ctx) {
-        return ctx.on("qq.group-message", (event) => {
-            // payload is typed QqMessage
-            const content: string = event.payload.content;
-            return ctx.send(event.address, `echo: ${content}`);
-        });
+    apply(input: { messages: QqMessageStream }) {
+        return mapStream(input.messages, (event) => ({
+            address: event.address,
+            content: `echo: ${event.payload.content}`,
+        }));
     },
 });
 
-const qq = qqGatewayPlatform({ ws: "qq-ws", api: "qq-api", env: "qq-env" });
+const qq = qqGatewayPlatform("qq");
 
 const kernel = createKernel()
     .use(envVars("qq-env", ["QQ_BOT_APP_ID", "QQ_BOT_APP_SECRET"]))
-    .use(qq.api, {})
-    .use(qq.transport)
-    .use(qq.input, {})
-    .use(qq.output)
-    .use(reply);
+    .bind(qq.api, { option: {}, mapping: (ctx) => ({ env: ctx["qq-env"] }) })
+    .bind(qq.transport, { mapping: (ctx) => ({ api: ctx["qq/api"] }) })
+    .use(qq.input, {
+        option: {},
+        mapping: (ctx) => ({ connection: ctx["qq/transport"], api: ctx["qq/api"] }),
+    })
+    .use(reply, { mapping: (ctx) => ({ messages: ctx.qq }) })
+    .bind(qq.output, { mapping: (ctx) => ({ api: ctx["qq/api"], commands: ctx.reply }) });
 
-// the provided capabilities are typed on the folded kernel context
-const api: QqApi = kernel.ctx["qq-api"];
-const connection: WsConnection = kernel.ctx["qq-ws"];
-void api;
-void connection;
-
-// the env snapshot is keyed by the requested variable names
+// the env snapshot and the message stream are typed on the ctx
 const appId: string = kernel.ctx["qq-env"].QQ_BOT_APP_ID;
+const messages: QqMessageStream = kernel.ctx.qq;
 void appId;
+void messages;
 
-// send checks content against the folded qq platform contract
-void kernel.ctx.send({ platform: "qq", scope: "group", openid: "g1" }, "ok");
-// @ts-expect-error qq content is plain text, not an object
-void kernel.ctx.send({ platform: "qq", scope: "group", openid: "g1" }, { text: "nope" });
+// internal wiring is hidden from the final ctx
+// @ts-expect-error the api was bound, not used
+void kernel.ctx["qq/api"];
+// @ts-expect-error the transport was bound, not used
+void kernel.ctx["qq/transport"];
+// @ts-expect-error the output was bound, not used
+void kernel.ctx["qq/output"];
 
-// send rejects addresses of unregistered platforms
-// @ts-expect-error no "console" output is registered
-void kernel.ctx.send({ platform: "console", target: "stdout" }, "hello");
-
-// handlers can only subscribe to registered event kinds
-// @ts-expect-error "discord.message" was never registered by an input
-void kernel.ctx.on("discord.message", () => {});
-
-// registration order is enforced through the bundle
-// @ts-expect-error unregistered event kinds / output platforms
-void createKernel().use(reply);
-
-// the api injects the env capability: the env provider must register first
-// @ts-expect-error unprovided capabilities
-void createKernel().use(qq.api, {});
-
-// the transport injects the api capability: the api must register first
+// the api's env input cannot be identity-wired: no "env" namespace
 void createKernel()
     .use(envVars("qq-env", ["QQ_BOT_APP_ID", "QQ_BOT_APP_SECRET"]))
-    // @ts-expect-error unprovided capabilities
-    .use(qq.transport);
+    // @ts-expect-error mapping is required when the declared input is absent
+    .bind(qq.api, { option: {} });
 
-// the input injects both the transport and the api capabilities
+// ...and its config is required even with a mapping
 void createKernel()
     .use(envVars("qq-env", ["QQ_BOT_APP_ID", "QQ_BOT_APP_SECRET"]))
-    .use(qq.api, {})
-    .use(qq.transport)
-    // @ts-expect-error the input config is required (pass `{}` for defaults)
-    .use(qq.input);
+    // @ts-expect-error option is required (pass `{}` for defaults)
+    .bind(qq.api, { mapping: (ctx) => ({ env: ctx["qq-env"] }) });
 
-// the output injects the api capability
-// @ts-expect-error unprovided capabilities
-void createKernel().use(qq.output);
+// mappings are checked against the visible-and-hidden ctx: the transport
+// cannot see the api before it is composed
+void createKernel()
+    .use(envVars("qq-env", ["QQ_BOT_APP_ID", "QQ_BOT_APP_SECRET"]))
+    .bind(qq.transport, {
+        // @ts-expect-error "qq/api" is not composed yet
+        mapping: (ctx) => ({ api: ctx["qq/api"] }),
+    });
+
+// the input config is required (pass `{}` for defaults)
+void createKernel()
+    .use(envVars("qq-env", ["QQ_BOT_APP_ID", "QQ_BOT_APP_SECRET"]))
+    .bind(qq.api, { option: {}, mapping: (ctx) => ({ env: ctx["qq-env"] }) })
+    .bind(qq.transport, { mapping: (ctx) => ({ api: ctx["qq/api"] }) })
+    // @ts-expect-error option is required (pass `{}` for defaults)
+    .use(qq.input, {
+        mapping: (ctx) => ({ connection: ctx["qq/transport"], api: ctx["qq/api"] }),
+    });

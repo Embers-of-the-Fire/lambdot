@@ -1,8 +1,8 @@
 # lambdot
 
 A stateless, serverless, non-context-aware chatbot framework. For chatbots like
-Discord bots and Twitter bots — not LLM agents. The core is a pure event
-pipeline that owns nothing conversational; everything else — inputs, outputs,
+Discord bots and Twitter bots — not LLM agents. The core is a pure composition
+runtime that owns nothing conversational; everything else — inputs, outputs,
 state backends, features — is a plugin, composed through TypeScript's type
 system.
 
@@ -16,59 +16,76 @@ $ nub examples/echo-bot/index.ts     # the echo bot: type a line, get it echoed
 ## Concepts
 
 ```
-┌────────────┐   BotEvent    ┌───────────────────────────────────────┐
-│  BotInput  │──────────────▶│  bot/ingress waterfall (middleware)   │
-│ (console)  │               │   → per-kind dispatch                 │
-└────────────┘               │   → plugin handlers                   │
-                             │        ctx.state (typed, opt-in)      │
-┌────────────┐  ctx.send()   │        ctx.send(event.address, ...)   │
-│ BotOutput  │◀──────────────│                                       │
-│ (console)  │               └───────────────────────────────────────┘
-└────────────┘                 Kernel — stateless, owns nothing
+┌──────────────┐  Stream<Message>  ┌────────────────────────────────────┐
+│ input plugin │──────────────────▶│ feature plugins (mapStream/merge)  │
+│ (console)    │                   │   state backends as namespaces     │
+└──────────────┘                   │        ↓ Stream<Command>           │
+┌──────────────┐   pumpStream      │   filtered by address.platform     │
+│ output plugin│◀──────────────────│                                    │
+│ (console)    │                   └────────────────────────────────────┘
+└──────────────┘                    Kernel — stateless, owns nothing
 ```
 
-- **Plugins are effects, no lifecycle hooks.** `apply(ctx, config)` returns
-  disposers; the plugin's fiber runs them on unload. Config is validated
-  through any Standard Schema validator.
-- **`inject`, not boot order.** A plugin listing `inject: ["state"]` stays
-  pending until something provides `state`, and unloads if it goes away.
-  Declaring the need as a typed capability (`TInjects`) additionally makes
-  registration order a compile-time concern and types the injected value on
-  the plugin's context (see `examples/websocket-bot`).
-- **The event bus is the only message-flow primitive.** `emit` / `parallel` /
-  `serial` for observation, `waterfall` for middleware — authentication,
-  logging, and filtering are ordinary waterfall listeners on `bot/ingress`.
-- **Outputs are fully typed contracts.** The core envelope carries no platform
-  semantics (no `inReplyTo`). Each output platform declares its own
-  address/content pair; `ctx.send(address, content)` only compiles when the
-  content matches the platform that owns the address.
-- **State is a plugin.** Backends implement `StateBackend`; plugins declare a
-  schema and get a typed, namespaced accessor via `ctx.state.for(name)`.
-  With no schema declared, `ctx.state` doesn't typecheck.
-- **Generic folding.** `createKernel().use(...)` accumulates event kinds,
-  output contracts, typed capabilities (`TProvides`/`TInjects`, folded as
-  `TCaps`), and state schemas into the kernel's type parameters. Registering
-  a plugin before the inputs/outputs it needs or the capabilities it injects
-  is a compile error (see `examples/echo-bot/type-test.ts` and
-  `examples/websocket-bot/type-test.ts`). Untyped, string-only `inject` stays
-  runtime-gated.
+- **A plugin is a function.** `apply(input, scope, config)` maps a declared
+  input record to an output value. No roles, no lifecycle hooks:
+  `scope.onDispose(d)` collects teardown (run in reverse on stop),
+  `scope.onError(e)` sinks background errors, and config is validated through
+  any Standard Schema validator.
+- **Composition is function application.** `use(plugin, { mapping, option,
+as })` feeds a plugin from the namespaces visible so far and exposes its
+  output on `ctx` under its name; `bind` keeps the output internal to the
+  chain (visible to later `mapping`s only). `mapping` is omitted when the
+  plugin's input keys already match — identity wiring — and referencing a
+  not-yet-composed namespace inside one is a compile error (see
+  `examples/echo-bot/type-test.ts` and `examples/websocket-bot/type-test.ts`).
+- **Streams are the message-flow primitive.** `Stream<T>` is an
+  `AsyncIterable` with broadcast semantics — every consumer sees every item,
+  in order, at its own pace. Inputs push from callbacks through `channel()`
+  and `shareStream`; features transform with `mapStream` / `filterStream` /
+  `mergeStreams`; outputs consume command streams with `pumpStream`.
+- **The envelope carries no platform semantics** (no `inReplyTo`). `Message`
+  is `payload` + `address`; `Command` is `address` + `content`; each platform
+  defines its own address type, and `address.platform` routes replies — a
+  command stream serving two platforms is filtered per output in the wiring
+  `mapping`.
+- **State is a plugin.** Backends implement `StateBackend`; a state plugin
+  emits one as its namespace value, and a feature declares the backend in its
+  input and builds a typed, namespaced accessor with
+  `createStateAccessor(backend, name)`.
+- **Platform services are ordinary namespace values.** A REST client, a
+  webhook handler, a database connection — anything a plugin emits lands on
+  `ctx` (or stays internal via `bind`) with its type intact (see
+  `examples/websocket-bot`).
 
 ## Writing a plugin
 
 ```ts
-import { definePlugin } from "@lambdot/core";
-import type { ConsoleEvents, ConsoleOutputs } from "@lambdot/console";
+import { consolePlatform, type ConsoleLine } from "@lambdot/console";
+import type { Stream } from "@lambdot/core";
+import { createKernel, definePlugin, mapStream } from "@lambdot/core";
 
-const echo = definePlugin<ConsoleEvents, ConsoleOutputs>({
+const echo = definePlugin({
     name: "echo",
-    apply(ctx) {
-        return ctx.on("console.line", (event) => ctx.send(event.address, `echo: ${event.payload}`));
+    apply(input: { "console/lines": Stream<ConsoleLine> }) {
+        return mapStream(input["console/lines"], (event) => ({
+            address: event.address,
+            content: `echo: ${event.payload}`,
+        }));
     },
 });
+
+const cli = consolePlatform();
+
+const kernel = createKernel()
+    .use(cli.lines) // exposes ctx["console/lines"]
+    .use(echo) // identity wiring: the input keys already match
+    .bind(cli.printer, { mapping: (ctx) => ({ replies: ctx.echo }) });
+
+await kernel.start();
 ```
 
-Events are processed sequentially in ingestion order, so read-modify-write
-against plugin state within an event handler is race-free.
+Each stream consumer processes items sequentially, so read-modify-write
+against plugin state inside a `mapStream` mapper is race-free.
 
 ## Repository layout
 
@@ -81,48 +98,48 @@ in the plugin ecosystem:
   machinery — it owns the socket lifecycle and defers everything
   chat-specific to a `WsSpec` supplied by its consumers, so it is a core
   behavior, not a chat platform; `env` reads variables from `process.env`
-  into a typed capability.
+  into a typed namespace.
 - **`protocol/`** — chat-service wire protocols (planned: `discord`, ...).
-  A protocol package supplies one chat service's address type,
-  event/output contracts, and frame codec, riding a core transport such as
+  A protocol package supplies one chat service's address type, stream
+  contracts, and frame codec, riding a core transport such as
   `@lambdot/websocket`. `qq` serves both QQ bot infras — the websocket
   gateway and the webhook (reversed post) — over one REST client.
   (Not `schema/`: "schema" in this codebase means
   Standard-Schema config validation.)
-- **`host/`** — hosting/runtime integrations: packages that embed a kernel
-  into the environment it runs in. `cloudflare` provides a worker's named
-  bindings (KV namespaces, D1 databases, R2 buckets, Durable Object
-  namespaces) as typed capabilities, plus bridges that serve `ctx.state`
-  from a KV namespace or Durable Object storage, and `wsHub`, the
-  server-side (Durable Object) mirror of `wsTransport`. (Not
+- **`host/`** — hosting/runtime integrations: packages that embed a
+  composition into the environment it runs in. `cloudflare` provides a
+  worker's named bindings (KV namespaces, D1 databases, R2 buckets, Durable
+  Object namespaces) as typed namespace values, plus bridges that serve a
+  `StateBackend` from a KV namespace or Durable Object storage, and `wsHub`,
+  the server-side (Durable Object) mirror of `wsTransport`. (Not
   `platform/`: "platform" in the framework already denotes the chat service
-  an address belongs to — `Address.platform`, `OutputPlugin.platform`.)
+  an address belongs to — `Address.platform`.)
 - **`state/`** — `StateBackend` implementations.
 
 Published package names stay self-describing (`@lambdot/state-memory`,
 `@lambdot/host-cloudflare`, future `@lambdot/protocol-discord`); npm
 has no category directories. Only core members keep framework-level names.
 
-| Path                          | Package                    | Role                                               |
-| ----------------------------- | -------------------------- | -------------------------------------------------- |
-| `packages/core/core`          | `@lambdot/core`            | kernel: effects, event bus, fibers, fold types     |
-| `packages/core/console`       | `@lambdot/console`         | console platform (`consolePlatform` bundle)        |
-| `packages/core/websocket`     | `@lambdot/websocket`       | websocket transport (`wsPlatform` bundle)          |
-| `packages/core/env`           | `@lambdot/env`             | `process.env` variables as a typed capability      |
-| `packages/protocol/qq`        | `@lambdot/protocol-qq`     | qq protocol: gateway + webhook infras, REST api    |
-| `packages/state/memory`       | `@lambdot/state-memory`    | in-memory `StateBackend` (reference backend)       |
-| `packages/state/sqlite`       | `@lambdot/state-sqlite`    | `node:sqlite` connection as a typed capability     |
-| `packages/host/cloudflare`    | `@lambdot/host-cloudflare` | worker bindings: KV/D1/R2/DO capabilities + state  |
-| `examples/echo-bot`           | —                          | echo bot and compile-time type tests               |
-| `examples/counter-bot`        | —                          | counting bot: the pluggable-state walkthrough      |
-| `examples/websocket-bot`      | —                          | websocket bot: the typed-capability walkthrough    |
-| `examples/dual-websocket-bot` | —                          | two tagged websocket platforms sharing one kernel  |
-| `examples/multi-kernel-bot`   | —                          | two kernels, one supervisor, an explicit bridge    |
-| `examples/cloudflare-bot`     | —                          | worker bot: hono + KV bindings under miniflare     |
-| `examples/durable-object-bot` | —                          | DO bot: websocket rooms + DO state under miniflare |
-| `examples/multi-echo-bot`     | —                          | one echo feature serving console + websocket       |
-| `examples/qq-gateway-bot`     | —                          | qq bot over the websocket gateway (fake platform)  |
-| `examples/qq-webhook-bot`     | —                          | qq bot over hono-served webhooks (fake platform)   |
+| Path                          | Package                    | Role                                                  |
+| ----------------------------- | -------------------------- | ----------------------------------------------------- |
+| `packages/core/core`          | `@lambdot/core`            | kernel: plugins, composition, streams, wire types     |
+| `packages/core/console`       | `@lambdot/console`         | console platform (`consolePlatform` bundle)           |
+| `packages/core/websocket`     | `@lambdot/websocket`       | websocket transport (`wsPlatform` bundle)             |
+| `packages/core/env`           | `@lambdot/env`             | `process.env` variables as a typed namespace          |
+| `packages/protocol/qq`        | `@lambdot/protocol-qq`     | qq protocol: gateway + webhook infras, REST api       |
+| `packages/state/memory`       | `@lambdot/state-memory`    | in-memory `StateBackend` (reference backend)          |
+| `packages/state/sqlite`       | `@lambdot/state-sqlite`    | `node:sqlite` connection as a namespace value         |
+| `packages/host/cloudflare`    | `@lambdot/host-cloudflare` | worker bindings: KV/D1/R2/DO namespaces + state + hub |
+| `examples/echo-bot`           | —                          | echo bot and compile-time type tests                  |
+| `examples/counter-bot`        | —                          | counting bot: the pluggable-state walkthrough         |
+| `examples/websocket-bot`      | —                          | websocket bot: the transport-wiring walkthrough       |
+| `examples/dual-websocket-bot` | —                          | two tagged websocket platforms in one composition     |
+| `examples/multi-kernel-bot`   | —                          | two compositions, one supervisor, an explicit bridge  |
+| `examples/cloudflare-bot`     | —                          | worker bot: hono + KV bindings under miniflare        |
+| `examples/durable-object-bot` | —                          | DO bot: websocket rooms + DO state under miniflare    |
+| `examples/multi-echo-bot`     | —                          | one echo feature serving console + websocket          |
+| `examples/qq-gateway-bot`     | —                          | qq bot over the websocket gateway (fake platform)     |
+| `examples/qq-webhook-bot`     | —                          | qq bot over hono-served webhooks (fake platform)      |
 
 ## Scripts
 

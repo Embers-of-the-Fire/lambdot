@@ -78,27 +78,38 @@ Release automation is release-plz-style, built on release-please
 
 Monorepo: `packages/<category>/*` (`@lambdot/*`) and `examples/*`
 (`@lambdot-example/*`). Package categories: `core` (the kernel plus
-platform-agnostic behaviors — the `console` reference platform, the
+platform-agnostic pieces — the `console` reference platform, the
 `websocket` transport factories, and `env` for reading `process.env` into a
-typed capability), `protocol` (chat-service wire protocols: `qq` serves both
+typed namespace), `protocol` (chat-service wire protocols: `qq` serves both
 QQ infras — the websocket gateway and the webhook (reversed post) — over one
 REST client; discord, ... none yet), `host` (hosting/runtime integrations:
 cloudflare — a worker's named KV/D1/R2/Durable-Object bindings and plain
-environment variables as typed capabilities, KV- and DO-storage-backed
+environment variables as typed namespaces, KV- and DO-storage-backed
 `StateBackend` bridges, and `wsHub`, the server-side (Durable Object)
 mirror of `wsTransport`), `state` (`StateBackend`
 implementations like `memory`, plus `sqlite` which owns a `node:sqlite`
-connection and provides it as a typed capability, D1-style).
-Everything is a plugin composed via `createKernel().use(...)`; the generic
-fold means
-**registration order is enforced at compile time** — inputs/outputs must be
-registered before feature plugins that consume them, and typed capabilities
-(`TProvides`/`TInjects`, folded as `TCaps`) before plugins that inject them.
-Untyped, string-only `inject` (e.g. `"state"`) stays runtime-gated only.
-For websocket platforms, prefer the `wsPlatform(capability, spec)` bundle
-from `@lambdot/websocket`; reach for the individual
-`wsTransport`/`wsInput`/`wsOutput` factories only when a platform needs the
-pieces separately.
+connection and emits it as its namespace value, D1-style).
+
+**A plugin is a function**: `apply(input, scope, config)` maps a declared
+input record to an output value. Composition is `use`/`bind`: each wires the
+next plugin's input with an optional `mapping` (a function from the
+namespaces visible so far — omitted when the plugin's input keys already
+match, since the type check is ordinary assignability) and exposes the
+plugin's output under its name — `use` puts it on the final `ctx`, `bind`
+keeps it internal to the chain (visible to later `mapping`s only). Because
+the mapping's parameter is typed as what is visible _so far_, wiring a
+plugin before its dependencies is a compile error. `option` carries the
+plugin's config (Standard-Schema validated) and is required exactly when the
+config type is non-void. There are no plugin roles: platforms are ordinary
+plugins whose inputs/outputs are **streams** (`Stream<T>`, an
+`AsyncIterable` with broadcast semantics — every consumer sees every item).
+Inputs emit message streams (`channel` + `shareStream`), features transform
+them (`mapStream`/`filterStream`/`mergeStreams`), outputs consume command
+streams (`pumpStream`), filtering by `address.platform`. Platform-specific
+services (the qq REST client, a webhook handler, a state backend) are just
+non-stream namespace values. Factory type params that end up as namespace
+keys or record keys need the `const` modifier (`const TName extends string`)
+or inline calls widen literals to `string`.
 
 `examples/echo-bot/type-test.ts` is a compile-time test suite: every
 `@ts-expect-error` line must remain a genuine error. Do not "fix" the flagged

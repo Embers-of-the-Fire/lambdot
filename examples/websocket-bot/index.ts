@@ -1,28 +1,33 @@
-import { createKernel, definePlugin } from "@lambdot/core";
+import type { Message, Stream } from "@lambdot/core";
+import { createKernel, definePlugin, mapStream } from "@lambdot/core";
 import { wsPlatform } from "@lambdot/websocket";
 
-import { echoSpec, type EchoEvents, type EchoOutputs } from "./echo-spec.ts";
+import { echoSpec, type WsEchoAddress } from "./echo-spec.ts";
 import { startEchoServer } from "./server.ts";
 
-const reply = definePlugin<EchoEvents, EchoOutputs>({
+const reply = definePlugin({
     name: "reply",
-    apply(ctx) {
-        return ctx.on("wsecho.message", (event) =>
-            ctx.send(event.address, `echo: ${event.payload}`),
-        );
+    apply(input: { wsecho: Stream<Message<string, WsEchoAddress>> }) {
+        return mapStream(input.wsecho, (event) => ({
+            address: event.address,
+            content: `echo: ${event.payload}`,
+        }));
     },
 });
 
 const server = await startEchoServer(8080);
 const url = `ws://127.0.0.1:${server.port}`;
 
-const wsecho = wsPlatform("ws", echoSpec);
+const wsecho = wsPlatform("wsecho", echoSpec);
 
 const kernel = createKernel()
-    .use(wsecho.transport, { url })
-    .use(wsecho.input)
-    .use(wsecho.output)
-    .use(reply);
+    .bind(wsecho.transport, { option: { url } })
+    .use(wsecho.input, { mapping: (ctx) => ({ connection: ctx["wsecho/transport"] }) })
+    // identity wiring: reply's input keys already match the visible ctx
+    .use(reply)
+    .bind(wsecho.output, {
+        mapping: (ctx) => ({ connection: ctx["wsecho/transport"], commands: ctx.reply }),
+    });
 
 await kernel.start();
 

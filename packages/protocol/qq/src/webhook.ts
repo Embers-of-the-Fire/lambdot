@@ -1,20 +1,21 @@
-import type { Disposer, InputPlugin } from "@lambdot/core";
+import type { Message, Plugin } from "@lambdot/core";
+import { channel, definePlugin, message, shareStream } from "@lambdot/core";
 import nacl from "tweetnacl";
 
-import { readQqCredentials, type QqCredentialKeys, type QqEnvNeeds } from "./credentials.ts";
-import { decodeMessageEvent, type QqEvents } from "./events.ts";
+import { readQqCredentials, type QqCredentialKeys } from "./credentials.ts";
+import type { QqAddress, QqMessage, QqMessageStream } from "./events.ts";
+import { decodeMessageEvent } from "./events.ts";
 
 /**
- * The request bridge, provided as a typed capability: the HTTP route lives
- * outside the event pipeline (a hono handler, a worker's fetch), so it hands
- * each callback request to `handle` and sends back the returned response —
- * the same bridge pattern as the cloudflare example's `PingService`.
+ * The request bridge, emitted as the plugin's namespace value: the HTTP
+ * route lives outside the composition (a hono handler, a worker's fetch), so
+ * it hands each callback request to `handle` and sends back the returned
+ * response. Decoded message dispatches join the `messages` stream.
  */
 export interface QqWebhook {
     handle(request: Request): Promise<Response>;
+    readonly messages: QqMessageStream;
 }
-
-export type QqWebhookCapability<TCap extends string> = { readonly [K in TCap]: QqWebhook };
 
 export interface QqWebhookConfig {
     /** Which env variables carry the credentials. */
@@ -23,40 +24,37 @@ export interface QqWebhookConfig {
 
 /**
  * The webhook (reversed-post) input: QQ pushes events to an HTTPS callback
- * address. Registers the message event kinds and provides a {@link QqWebhook}
- * capability that implements the callback algorithm — op 13 address
- * validation (sign `event_ts + plain_token`), ed25519 verification of
- * `X-Signature-Ed25519` over `timestamp + body` for everything else — then
- * ingests message dispatches. The bot secret seeds the ed25519 keypair
- * (repeated to 32 bytes).
+ * address. Emits a {@link QqWebhook} that implements the callback algorithm —
+ * op 13 address validation (sign `event_ts + plain_token`), ed25519
+ * verification of `X-Signature-Ed25519` over `timestamp + body` for
+ * everything else — then pushes message dispatches to the stream. The bot
+ * secret seeds the ed25519 keypair (repeated to 32 bytes).
  *
  * ```ts
- * .use(qqWebhookInput("qq-webhook", "qq-env"), {});
- * // in the hono route: return kernel.ctx["qq-webhook"].handle(c.req.raw);
+ * .use(qqWebhook("qq"), { option: {}, mapping: (ctx) => ({ env: ctx["qq-env"] }) });
+ * // in the hono route: return kernel.ctx.qq.handle(c.req.raw);
  * ```
  */
-export function qqWebhookInput<TCap extends string, TEnvCap extends string>(
-    capability: TCap,
-    env: TEnvCap,
-): InputPlugin<
-    QqEvents,
-    QqWebhookConfig,
-    `qq-webhook:${TCap}`,
-    QqWebhookCapability<TCap>,
-    QqEnvNeeds<TEnvCap>
-> {
-    return {
-        role: "input",
-        name: `qq-webhook:${capability}`,
-        inject: [env],
-        apply(ctx, config) {
-            const credentials = readQqCredentials(ctx[env], config.keys);
+export function qqWebhook<const TName extends string>(
+    name: TName,
+): Plugin<{ env: Readonly<Record<string, string>> }, QqWebhook, QqWebhookConfig, TName> {
+    return definePlugin({
+        name,
+        apply(input, scope, config) {
+            const credentials = readQqCredentials(input.env, config.keys);
             // The bot secret seeds the ed25519 keypair: repeat to 32 bytes.
             let seed = credentials.clientSecret;
             while (seed.length < 32) seed += seed;
             const keyPair = nacl.sign.keyPair.fromSeed(new TextEncoder().encode(seed.slice(0, 32)));
 
+            const messages = channel<Message<QqMessage, QqAddress>>();
+            scope.onDispose(() => {
+                messages.close();
+            });
+
             const webhook: QqWebhook = {
+                // Shared: several consumers may subscribe to the stream.
+                messages: shareStream(messages.stream),
                 async handle(request) {
                     if (request.method !== "POST")
                         return new Response("method not allowed", { status: 405 });
@@ -98,21 +96,15 @@ export function qqWebhookInput<TCap extends string, TEnvCap extends string>(
 
                     if (frame.op === 0 && typeof frame.t === "string") {
                         const decoded = decodeMessageEvent(frame.t, frame.d);
-                        if (decoded)
-                            await ctx.ingest(decoded.kind, decoded.payload, decoded.address);
+                        if (decoded) messages.push(message(decoded.payload, decoded.address));
                     }
                     return Response.json({});
                 },
             };
 
-            // See `wsTransport` in @lambdot/websocket for why `provide` is pinned here.
-            return (ctx.provide as (name: TCap, value: QqWebhook) => Disposer).call(
-                ctx,
-                capability,
-                webhook,
-            );
+            return webhook;
         },
-    };
+    });
 }
 
 function verify(publicKey: Uint8Array, message: string, signatureHex: string): boolean {

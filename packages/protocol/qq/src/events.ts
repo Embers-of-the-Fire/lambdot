@@ -1,4 +1,4 @@
-import type { Address, EventDef, OutputContract } from "@lambdot/core";
+import type { Address, Command, Message, Stream } from "@lambdot/core";
 
 /**
  * Where a qq message goes. Owned by the output half of the qq platform —
@@ -17,7 +17,7 @@ export interface QqAddress extends Address<"qq"> {
     readonly msgSeq?: number;
 }
 
-/** The payload produced by qq message events: plain-text content only. */
+/** The payload produced by qq message inputs: plain-text content only. */
 export interface QqMessage {
     /** Message id (`msg_id`), reused as the passive-reply reference. */
     readonly id: string;
@@ -27,19 +27,13 @@ export interface QqMessage {
 }
 
 /**
- * Events produced by qq inputs (gateway and webhook alike): one kind per
- * conversation scope. A type alias (not an interface extending `EventMap`)
- * so `keyof` stays exactly these kinds.
+ * The qq platform's stream contracts: inputs emit message streams, features
+ * emit command streams, outputs consume them. Features written against these
+ * two types run on either infra (gateway or webhook) — the wiring `mapping`
+ * is the platform adapter.
  */
-export type QqEvents = {
-    "qq.group-message": EventDef<QqMessage, QqAddress>;
-    "qq.c2c-message": EventDef<QqMessage, QqAddress>;
-};
-
-/** The qq platform's output contract: plain text (msg_type 0). */
-export type QqOutputs = {
-    qq: OutputContract<QqAddress, string>;
-};
+export type QqMessageStream = Stream<Message<QqMessage, QqAddress>>;
+export type QqCommandStream = Stream<Command<QqAddress, string>>;
 
 /** The wire shape of a `GROUP_AT_MESSAGE_CREATE` dispatch body. */
 interface QqRawGroupMessage {
@@ -59,14 +53,14 @@ interface QqRawC2cMessage {
 }
 
 /**
- * Decode a dispatch (`t`, `d`) pair into an ingestible event, or null to
- * ignore it. Shared by the gateway and webhook inputs — both transports
- * deliver the same `{op, t, d}` envelope.
+ * Decode a dispatch (`t`, `d`) pair into a message, or null to ignore it.
+ * Shared by the gateway and webhook inputs — both transports deliver the
+ * same `{op, t, d}` envelope.
  */
 export function decodeMessageEvent(
     t: string,
     d: unknown,
-): { kind: keyof QqEvents; payload: QqMessage; address: QqAddress } | null {
+): { payload: QqMessage; address: QqAddress } | null {
     if (typeof d !== "object" || d === null) return null;
 
     if (t === "GROUP_AT_MESSAGE_CREATE") {
@@ -79,7 +73,6 @@ export function decodeMessageEvent(
         )
             return null;
         return {
-            kind: "qq.group-message",
             payload: {
                 id: raw.id,
                 // The platform strips the @bot prefix but leaves padding.
@@ -105,7 +98,6 @@ export function decodeMessageEvent(
         )
             return null;
         return {
-            kind: "qq.c2c-message",
             payload: {
                 id: raw.id,
                 content: raw.content.trim(),

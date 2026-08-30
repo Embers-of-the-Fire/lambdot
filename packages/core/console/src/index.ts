@@ -1,88 +1,90 @@
 import { createInterface } from "node:readline/promises";
 
-import type { Address, EventDef, InputPlugin, OutputContract, OutputPlugin } from "@lambdot/core";
+import type { Address, Command, Message, Plugin, Stream } from "@lambdot/core";
+import { channel, definePlugin, message, pumpStream, shareStream } from "@lambdot/core";
 
 /**
- * Where a console message goes. Owned by the output half of the console
- * platform pair — outputs consume addresses, inputs produce them.
+ * Where a console message goes. Owned by the printer half of the console
+ * platform — printers consume addresses, line sources produce them.
  */
 export interface ConsoleAddress extends Address<"console"> {
     readonly target: "stdout" | "stderr";
 }
 
-/** The console platform's output contract: plain text. */
-export type ConsoleOutputs = {
-    console: OutputContract<ConsoleAddress, string>;
-};
+/** One line read from stdin. */
+export type ConsoleLine = Message<string, ConsoleAddress>;
 
-/**
- * Events produced by the console input: one per line read from stdin.
- * A type alias (not an interface extending `EventMap`) so `keyof` stays
- * exactly these kinds — an interface extending `Record` would inherit a
- * string index signature and make every kind subscribable.
- */
-export type ConsoleEvents = {
-    "console.line": EventDef<string, ConsoleAddress>;
-};
+/** One line to print: plain text to a console target. */
+export type ConsoleReply = Command<ConsoleAddress, string>;
 
-/** The input half of the console platform: one `console.line` event per line read from stdin. */
-export function consoleInput(): InputPlugin<ConsoleEvents, void, "console-input"> {
-    return {
-        role: "input",
-        name: "console-input",
-        apply(ctx) {
+/** The input half of the console platform: a stream of lines read from stdin. */
+export function consoleLines(): Plugin<void, Stream<ConsoleLine>, void, "console/lines"> {
+    return definePlugin({
+        name: "console/lines",
+        apply(_input, scope) {
+            const lines = channel<ConsoleLine>();
             const rl = createInterface({ input: process.stdin, terminal: false });
             rl.on("line", (line) => {
-                void ctx.ingest("console.line", line, { platform: "console", target: "stdout" });
+                lines.push(message(line, { platform: "console", target: "stdout" }));
             });
-            return () => {
+            scope.onDispose(() => {
                 rl.close();
-            };
+                lines.close();
+            });
+            // Shared: several consumers (features, loggers, supervisors) may
+            // each subscribe to the line stream.
+            return shareStream(lines.stream);
         },
-    };
+    });
 }
 
-/** The output half of the console platform: writes plain text to stdout or stderr. */
-export function consoleOutput(): OutputPlugin<
-    "console",
-    ConsoleAddress,
-    string,
+/** The output half of the console platform: prints a reply stream to stdout/stderr. */
+export function consolePrinter(): Plugin<
+    { replies: Stream<ConsoleReply> },
     void,
-    "console-output"
+    void,
+    "console/printer"
 > {
-    return {
-        role: "output",
-        name: "console-output",
-        platform: "console",
-        send(to, content) {
-            const stream = to.target === "stderr" ? process.stderr : process.stdout;
-            stream.write(`${content}\n`);
+    return definePlugin({
+        name: "console/printer",
+        apply(input, scope) {
+            scope.onDispose(
+                pumpStream(
+                    input.replies,
+                    ({ address, content }) => {
+                        const stream =
+                            address.target === "stderr" ? process.stderr : process.stdout;
+                        stream.write(`${content}\n`);
+                    },
+                    (error) => scope.onError(error),
+                ),
+            );
         },
-    };
+    });
 }
 
 /**
- * One console platform, bundled: the stdin input and stdout/stderr output
- * halves. The pair stays separate (rather than one fused plugin) so the
- * type fold can keep enforcing registration order — input and output before
- * the feature plugins that consume them.
- *
+ * One console platform, bundled: the stdin line source and the stdout/stderr
+ * printer. The printer is terminal — it consumes a reply stream produced by
+ * later feature plugins, so it is wired last with a mapping:
+
  * ```ts
  * const cli = consolePlatform();
  * createKernel()
- *     .use(cli.input)
- *     .use(cli.output);
+ *     .use(cli.lines)
+ *     .use(echo)
+ *     .use(cli.printer, { mapping: (ctx) => ({ replies: ctx.echo }) });
  * ```
  */
 export interface ConsolePlatform {
-    readonly input: InputPlugin<ConsoleEvents, void, "console-input">;
-    readonly output: OutputPlugin<"console", ConsoleAddress, string, void, "console-output">;
+    readonly lines: Plugin<void, Stream<ConsoleLine>, void, "console/lines">;
+    readonly printer: Plugin<{ replies: Stream<ConsoleReply> }, void, void, "console/printer">;
 }
 
-/** Build a whole console platform (stdin input + stdout/stderr output). */
+/** Build a whole console platform (stdin lines + stdout/stderr printer). */
 export function consolePlatform(): ConsolePlatform {
     return {
-        input: consoleInput(),
-        output: consoleOutput(),
+        lines: consoleLines(),
+        printer: consolePrinter(),
     };
 }

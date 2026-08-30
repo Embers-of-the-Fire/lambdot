@@ -1,126 +1,83 @@
 /**
  * Compile-time assertions for the generic-transport pattern, mirroring
- * echo-bot/type-test.ts: the fold and the registration gate must keep
- * working through the generic `@lambdot/websocket` factories — including
- * with two websocket transports in one kernel.
+ * echo-bot/type-test.ts: mapping-based wiring and namespace visibility must
+ * keep working through the generic `@lambdot/websocket` factories —
+ * including with two websocket platforms in one composition.
  */
-import { createKernel, definePlugin } from "@lambdot/core";
-import {
-    wsInput,
-    wsOutput,
-    wsPlatform,
-    wsTransport,
-    type WsCapability,
-    type WsConnection,
-} from "@lambdot/websocket";
+import type { Command, Message, Stream } from "@lambdot/core";
+import { createKernel, definePlugin, mapStream } from "@lambdot/core";
+import { wsPlatform } from "@lambdot/websocket";
 
-import { echoSpec, type EchoEvents, type EchoOutputs } from "./echo-spec.ts";
+import { echoSpec, type WsEchoAddress } from "./echo-spec.ts";
 
-const reply = definePlugin<EchoEvents, EchoOutputs>({
+const reply = definePlugin({
     name: "reply",
-    apply(ctx) {
-        return ctx.on("wsecho.message", (event) => {
-            // payload is typed string
-            const text: string = event.payload;
-            return ctx.send(event.address, `echo: ${text}`);
-        });
+    apply(input: { wsecho: Stream<Message<string, WsEchoAddress>> }) {
+        return mapStream(input.wsecho, (event) => ({
+            address: event.address,
+            content: `echo: ${event.payload}`,
+        }));
     },
 });
+
+const wsecho = wsPlatform("wsecho", echoSpec);
 
 const kernel = createKernel()
-    .use(wsTransport("ws"), { url: "ws://localhost:1" })
-    .use(wsInput("ws", echoSpec))
-    .use(wsOutput("ws", echoSpec))
-    .use(reply);
+    .bind(wsecho.transport, { option: { url: "ws://localhost:1" } })
+    .use(wsecho.input, { mapping: (ctx) => ({ connection: ctx["wsecho/transport"] }) })
+    .use(reply)
+    .bind(wsecho.output, {
+        mapping: (ctx) => ({ connection: ctx["wsecho/transport"], commands: ctx.reply }),
+    });
 
-// the transport's provided service is typed on the folded kernel context
-const connection: WsConnection = kernel.ctx.ws;
-void connection;
+// the exposed namespaces are typed on the composition's ctx
+const messages: Stream<Message<string, WsEchoAddress>> = kernel.ctx.wsecho;
+const commands: Stream<Command<WsEchoAddress, string>> = kernel.ctx.reply;
+void messages;
+void commands;
 
-// send checks content against the folded ws platform contract
-void kernel.ctx.send({ platform: "wsecho" }, "ok");
-// @ts-expect-error wsecho content is string, not an object
-void kernel.ctx.send({ platform: "wsecho" }, { text: "nope" });
-
-// send rejects addresses of unregistered platforms
-// @ts-expect-error no "discord" output is registered
-void kernel.ctx.send({ platform: "discord", channel: "123" }, "hello");
-
-// handlers can only subscribe to registered event kinds
-// @ts-expect-error "discord.message" was never registered by an input
-void kernel.ctx.on("discord.message", () => {});
-
-// registration order is enforced through the generic factories
-// @ts-expect-error unregistered event kinds / output platforms
-void createKernel().use(reply);
-
-// the input alone satisfies neither the capability nor the output platform
-// @ts-expect-error unprovided capabilities
-void createKernel().use(wsInput("ws", echoSpec)).use(reply);
-
-// typed capability injection is gated: the transport must register first
-// @ts-expect-error unprovided capabilities
-void createKernel().use(wsInput("ws", echoSpec));
+// bound namespaces are hidden from the final ctx
+// @ts-expect-error the transport was bound, not used
+void kernel.ctx["wsecho/transport"];
+// @ts-expect-error the output was bound, not used
+void kernel.ctx["wsecho/output"];
 
 // the transport config is required and typed
-// @ts-expect-error url is required
-void createKernel().use(wsTransport("ws"));
-
-// two transports with distinct capability names fold side by side
-const twoTransports = createKernel()
-    .use(wsTransport("ws-a"), { url: "ws://localhost:1" })
-    .use(wsTransport("ws-b"), { url: "ws://localhost:2" });
-const connA: WsConnection = twoTransports.ctx["ws-a"];
-const connB: WsConnection = twoTransports.ctx["ws-b"];
-void connA;
-void connB;
-
-// each platform's plugins gate on their own transport's capability
-void createKernel()
-    .use(wsTransport("ws-a"), { url: "ws://localhost:1" })
-    // @ts-expect-error "ws-b" is not in the fold yet
-    .use(wsInput("ws-b", echoSpec));
-
-// the bundled combinator: one declaration per platform, same fold behavior
-const wsecho = wsPlatform("ws", echoSpec);
-const bundled = createKernel()
-    .use(wsecho.transport, { url: "ws://localhost:1" })
-    .use(wsecho.input)
-    .use(wsecho.output)
-    .use(reply);
-const bundledConnection: WsConnection = bundled.ctx.ws;
-void bundledConnection;
-void bundled.ctx.send({ platform: "wsecho" }, "ok");
-
-// the bundle does not bypass the registration gate
-// @ts-expect-error the transport must register before the input that injects it
-void createKernel().use(wsecho.input);
-
-// injected capability value types are checked against the fold
-const wrongCaps = definePlugin<{}, {}, undefined, void, string, {}, { ws: number }>({
-    name: "wrong-caps",
-    inject: ["ws"],
-    apply: () => {},
-});
-// @ts-expect-error ws is a WsConnection, not a number
-void createKernel().use(wsTransport("ws"), { url: "ws://localhost:1" }).use(wrongCaps);
-
-// with typed TInjects declared, inject is restricted to the declared names
-void definePlugin<{}, {}, undefined, void, string, {}, WsCapability<"ws">>({
-    name: "bad-inject",
-    // @ts-expect-error "state" is not a declared capability need
-    inject: ["state"],
-    apply: () => {},
-});
-
-// provide is type-checked against the declaring plugin's TProvides
-void definePlugin<{}, {}, undefined, void, string, WsCapability<"ws">>({
-    name: "bad-provider",
-    apply(ctx) {
-        ctx.provide("ws", connection);
-        // @ts-expect-error the ws capability requires a WsConnection value
-        ctx.provide("ws", 42);
-        // undeclared names stay on the runtime-only path
-        ctx.provide("metrics");
+// @ts-expect-error option carrying the url is required
+void createKernel().bind(wsecho.transport);
+void createKernel().bind(wsecho.transport, {
+    option: {
+        // @ts-expect-error url must be a string
+        url: 42,
     },
 });
+
+// the input's connection cannot be identity-wired: no "connection" namespace
+// @ts-expect-error mapping is required when the declared input is absent
+void createKernel().use(wsecho.input);
+
+// mappings see bound namespaces too (hidden from ctx, visible to wiring)
+void createKernel()
+    .bind(wsecho.transport, { option: { url: "ws://localhost:1" } })
+    .use(wsecho.input, {
+        // @ts-expect-error the connection lives under "wsecho/transport"
+        mapping: (ctx) => ({ connection: ctx["wsecho"] }),
+    });
+
+// two platforms fold side by side under distinct names
+const second = wsPlatform("wsecho-b", echoSpec);
+const pair = createKernel()
+    .bind(wsecho.transport, { option: { url: "ws://localhost:1" } })
+    .use(wsecho.input, { mapping: (ctx) => ({ connection: ctx["wsecho/transport"] }) })
+    .bind(second.transport, { option: { url: "ws://localhost:2" } })
+    .use(second.input, { mapping: (ctx) => ({ connection: ctx["wsecho-b/transport"] }) });
+const first: Stream<Message<string, WsEchoAddress>> = pair.ctx.wsecho;
+const other: Stream<Message<string, WsEchoAddress>> = pair.ctx["wsecho-b"];
+void first;
+void other;
+
+// ...and reusing one name twice is rejected
+void createKernel()
+    .bind(wsecho.transport, { option: { url: "ws://localhost:1" } })
+    // @ts-expect-error "wsecho/transport" is already taken
+    .bind(second.transport, { as: "wsecho/transport", option: { url: "ws://localhost:2" } });

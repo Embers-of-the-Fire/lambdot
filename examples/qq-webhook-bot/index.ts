@@ -1,7 +1,7 @@
 import { serve } from "@hono/node-server";
-import { createKernel, definePlugin } from "@lambdot/core";
+import { createKernel, definePlugin, mapStream } from "@lambdot/core";
 import { envVars } from "@lambdot/env";
-import { qqWebhookPlatform, type QqEvents, type QqOutputs } from "@lambdot/protocol-qq";
+import { qqWebhookPlatform, type QqMessageStream } from "@lambdot/protocol-qq";
 import { Hono } from "hono";
 
 import { startFakeQqPlatform } from "./platform.ts";
@@ -12,37 +12,38 @@ import { startFakeQqPlatform } from "./platform.ts";
 process.env.QQ_BOT_APP_ID ??= "102000001";
 process.env.QQ_BOT_APP_SECRET ??= "fake-bot-secret-fake-bot-se";
 
-const reply = definePlugin<QqEvents, QqOutputs>({
+const reply = definePlugin({
     name: "reply",
-    apply(ctx) {
-        return [
-            ctx.on("qq.group-message", (event) =>
-                ctx.send(event.address, `echo: ${event.payload.content}`),
-            ),
-            ctx.on("qq.c2c-message", (event) =>
-                ctx.send(event.address, `echo: ${event.payload.content}`),
-            ),
-        ];
+    apply(input: { messages: QqMessageStream }) {
+        return mapStream(input.messages, (event) => ({
+            address: event.address,
+            content: `echo: ${event.payload.content}`,
+        }));
     },
 });
 
-const qq = qqWebhookPlatform({ webhook: "qq-webhook", api: "qq-api", env: "qq-env" });
+const qq = qqWebhookPlatform("qq");
 
 const platform = await startFakeQqPlatform();
 
 const kernel = createKernel()
     .use(envVars("qq-env", ["QQ_BOT_APP_ID", "QQ_BOT_APP_SECRET"]))
-    .use(qq.webhook, {})
-    .use(qq.api, { apiBase: platform.apiBase })
-    .use(qq.output)
-    .use(reply);
+    .use(qq.webhook, { option: {}, mapping: (ctx) => ({ env: ctx["qq-env"] }) })
+    .bind(qq.api, {
+        option: { apiBase: platform.apiBase },
+        mapping: (ctx) => ({ env: ctx["qq-env"] }),
+    })
+    // the mapping is the platform adapter: reply wants "messages", the
+    // webhook emits { handle, messages }
+    .use(reply, { mapping: (ctx) => ({ messages: ctx.qq.messages }) })
+    .bind(qq.output, { mapping: (ctx) => ({ api: ctx["qq/api"], commands: ctx.reply }) });
 
 await kernel.start();
 
-// The hono app owns the HTTP surface; the webhook capability owns the
+// The hono app owns the HTTP surface; the webhook namespace owns the
 // callback algorithm. This bridge is the whole "reversed post" integration.
 const app = new Hono();
-app.post("/qq/callback", (c) => kernel.ctx["qq-webhook"].handle(c.req.raw));
+app.post("/qq/callback", (c) => kernel.ctx.qq.handle(c.req.raw));
 
 const server = serve({ fetch: app.fetch, port: 0 });
 const port = await new Promise<number>((resolve) => {
@@ -62,8 +63,8 @@ const fail = (message: string): never => {
 //    answers with an ed25519 signature the platform can verify.
 if (!(await platform.validateCallback(callbackUrl))) fail("callback validation rejected");
 
-// 2. A signed dispatch is ingested and answered through the REST mock:
-//    platform → webhook → reply feature → output → REST mock.
+// 2. A signed dispatch is pushed to the stream and answered through the
+//    REST mock: platform → webhook → reply feature → output → REST mock.
 const echoed = platform.waitForMessage((message) => message.content.startsWith("echo:"));
 const timeout = new Promise<never>((_, reject) => {
     setTimeout(() => reject(new Error("timed out waiting for echo")), 5000);
