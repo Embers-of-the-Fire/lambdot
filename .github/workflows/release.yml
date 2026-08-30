@@ -4,6 +4,10 @@ name: Release
 #   1. On every push to main, release-please opens (or refreshes) a single
 #      release PR that bumps all publishable packages in lockstep and updates
 #      their CHANGELOG.md files. See release-please-config.json.
+#   1b. The lockfile job then syncs nub.lock onto the release PR branch —
+#       release-please bumps the exact inter-package pins in package.json but
+#       cannot update nub.lock's recorded specifiers itself. Run manually via
+#       workflow_dispatch to repair an already-stale release PR.
 #   2. Merging that PR makes release-please cut one git tag + GitHub release
 #      per package and flips `releases_created`, which triggers the publish
 #      job below.
@@ -11,6 +15,7 @@ name: Release
 on:
     push:
         branches: [main]
+    workflow_dispatch:
 
 permissions:
     contents: write
@@ -30,6 +35,59 @@ jobs:
         steps:
             - uses: googleapis/release-please-action@v4
               id: release
+
+    # release-please bumps the exact inter-package pins in package.json but
+    # never touches nub.lock, which records those pins as specifiers. Without
+    # this job every release PR (and main after merging one) fails
+    # `nub install --frozen-lockfile` with ERR_NUB_OUTDATED_LOCKFILE. Run on
+    # every run that did not cut releases — drift is a property of the branch,
+    # not of this run — and no-op unless nub.lock actually changes. The
+    # specifier-only guard refuses to commit anything else (e.g. a lockfile
+    # corrupted by registry flakiness mid-resolve).
+    lockfile:
+        name: Sync nub.lock on release PR
+        needs: release-please
+        if: needs.release-please.outputs.releases_created != 'true'
+        runs-on: ubuntu-latest
+        # Serialize writes to the release branch. The workflow-level group is
+        # keyed on github.ref, so dispatches from different refs (or a
+        # dispatch overlapping a main push) can still check out the same
+        # release-please--branches--main head concurrently — the loser's
+        # git push is then rejected as non-fast-forward. Queue instead.
+        concurrency:
+            group: release-branch-sync
+            cancel-in-progress: false
+        steps:
+            - uses: actions/checkout@v7
+
+            - uses: nubjs/setup-nub@v0
+
+            - name: Sync nub.lock on the release PR branch
+              run: |
+                  branch=release-please--branches--main
+                  if ! git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+                      echo "No pending release PR branch; nothing to sync"
+                      exit 0
+                  fi
+                  git fetch origin "$branch"
+                  git checkout -B "$branch" "origin/$branch"
+                  nub install
+                  if git diff --quiet -- nub.lock; then
+                      echo "nub.lock already in sync"
+                      exit 0
+                  fi
+                  changed=$(git diff -- nub.lock | grep -c '^[+-][^+-]' || true)
+                  specifiers=$(git diff -- nub.lock | grep -cE '^[+-] +specifier: [0-9]+\.[0-9]+\.[0-9]+$' || true)
+                  if [ "$changed" -ne "$specifiers" ]; then
+                      echo "nub.lock changed beyond inter-package specifier bumps; refusing to auto-commit:"
+                      git diff -- nub.lock
+                      exit 1
+                  fi
+                  git config user.name "github-actions[bot]"
+                  git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+                  git add nub.lock
+                  git commit -m "chore: sync nub.lock with release version bumps"
+                  git push origin "$branch"
 
     publish:
         name: Publish to npm
