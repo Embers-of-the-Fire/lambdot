@@ -2,10 +2,6 @@
     "name": "lambdot",
     "version": "0.0.1",
     "private": true,
-    "workspaces": [
-        "packages/*/*",
-        "examples/*"
-    ],
     "type": "module",
     "scripts": {
         "fmt": "oxfmt",
@@ -23,10 +19,10 @@
     },
     "devEngines": {
         "packageManager": {
-            "name": "nub",
-            "version": "^0.8.0",
-            "onFail": "ignore"
+            "name": "pnpm",
+            "version": "11.22.0",
+            "onFail": "warn"
         }
     },
-    "packageManager": "nub@0.8.0"
+    "packageManager": "pnpm@11.22.0"
 }
