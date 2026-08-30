@@ -40,7 +40,7 @@ export function qqWebhook<const TName extends string>(
 ): Plugin<{ env: Readonly<Record<string, string>> }, QqWebhook, QqWebhookConfig, TName> {
     return definePlugin({
         name,
-        apply(input, _scope, config) {
+        apply(input, scope, config) {
             const credentials = readQqCredentials(input.env, config.keys);
             // The bot secret seeds the ed25519 keypair: repeat to 32 bytes.
             let seed = credentials.clientSecret;
@@ -48,6 +48,9 @@ export function qqWebhook<const TName extends string>(
             const keyPair = nacl.sign.keyPair.fromSeed(new TextEncoder().encode(seed.slice(0, 32)));
 
             const messages = channel<Message<QqMessage, QqAddress>>();
+            scope.onDispose(() => {
+                messages.close();
+            });
 
             const webhook: QqWebhook = {
                 // Shared: several consumers may subscribe to the stream.
