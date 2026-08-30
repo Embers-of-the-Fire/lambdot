@@ -7,6 +7,11 @@ export type {
     D1ExecResult,
     D1PreparedStatement,
     D1Result,
+    DurableObjectId,
+    DurableObjectNamespace,
+    DurableObjectState,
+    DurableObjectStorage,
+    DurableObjectStub,
     KVListKey,
     KVListOptions,
     KVListResult,
@@ -20,6 +25,17 @@ export type {
     R2PutOptions,
     R2PutValue,
 } from "./bindings.ts";
+export type {
+    DoCapability,
+    DoStorageConfig,
+    DurableObjectNamespaceConfig,
+    WebSocketHub,
+    WebSocketHubControl,
+    WsHub,
+    WsHubCapability,
+    WsHubConfig,
+} from "./durable-object.ts";
+export { doState, durableObjectNamespace, wsHub } from "./durable-object.ts";
 
 /**
  * The typed capability contracts shared by a binding provider and its

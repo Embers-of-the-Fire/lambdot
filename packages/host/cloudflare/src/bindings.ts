@@ -136,3 +136,40 @@ export interface R2Bucket {
     delete(keys: string | readonly string[]): Promise<void>;
     list(options?: R2ListOptions): Promise<R2Objects>;
 }
+
+/* ---------------------------- Durable Objects ---------------------------- */
+
+/** A Durable Object id, minted by a {@link DurableObjectNamespace}. */
+export interface DurableObjectId {
+    toString(): string;
+    equals(other: DurableObjectId): boolean;
+}
+
+/** A stub talking to one Durable Object instance: the fetch entry only. */
+export interface DurableObjectStub {
+    fetch(request: Request): Promise<Response>;
+}
+
+/**
+ * The fundamental slice of a Durable Object namespace binding: name an
+ * instance, then talk to it through its stub.
+ */
+export interface DurableObjectNamespace {
+    idFromName(name: string): DurableObjectId;
+    get(id: DurableObjectId): DurableObjectStub;
+}
+
+/**
+ * The fundamental slice of a Durable Object's transactional storage:
+ * per-instance, structured-cloneable values, no JSON round trip needed.
+ */
+export interface DurableObjectStorage {
+    get<T = unknown>(key: string): Promise<T | undefined>;
+    put(key: string, value: unknown): Promise<void>;
+    delete(key: string): Promise<boolean>;
+}
+
+/** The slice of a Durable Object's constructor state the framework builds on. */
+export interface DurableObjectState {
+    readonly storage: DurableObjectStorage;
+}
