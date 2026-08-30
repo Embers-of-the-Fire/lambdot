@@ -46,6 +46,10 @@ const pingPong = definePlugin({
         const state = createStateAccessor<PingPongSchema>(input.state, "ping-pong");
         const service: PingService = {
             async handle(message) {
+                // Illustrative read-modify-write: concurrent pings served by
+                // separate isolates can race and lose an increment, because
+                // KV offers no atomic increment. For atomic semantics use a
+                // Durable Object (`doState` from @lambdot/host-cloudflare).
                 const count = ((await state.get("count")) ?? 0) + 1;
                 await state.set("count", count);
                 return { reply: `pong: ${message}`, count };

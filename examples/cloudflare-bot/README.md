@@ -50,6 +50,11 @@ own integration test.
    isolate. The mapping types enforce the ordering: `kvNamespace` before
    `kvState` before the stateful feature — the last step identity-wires,
    since the bound `state` namespace matches the feature's declared input.
+   Note that the increment is a plain read-modify-write: concurrent pings
+   served by separate isolates can race and lose an increment, because KV
+   offers no atomic increment. The counter is illustrative; for atomic
+   state semantics, compose inside a Durable Object with the `doState`
+   backend instead.
 4. **One persistent kernel per isolate, not per request.** Workers hand
    bindings out per request, but the kernel is booted once —
    `bot ??= createBot(c.env)` in the handler, with `start` idempotent — and
