@@ -80,6 +80,8 @@ export function shareStream<T>(stream: Stream<T>): Stream<T> {
     const consumers = new Set<Consumer>();
     let closed = false;
     let pulling = false;
+    let iterator: AsyncIterator<T> | undefined;
+    let held: { value: T } | undefined;
 
     const push = (item: T): void => {
         for (const consumer of consumers) {
@@ -94,16 +96,36 @@ export function shareStream<T>(stream: Stream<T>): Stream<T> {
     };
 
     const pull = (): void => {
-        if (pulling) return;
+        if (pulling || closed) return;
         pulling = true;
         void (async () => {
-            let sourceDone = true;
-            for await (const item of stream) {
-                // Nobody listening: pause (the source buffers) until the
-                // next consumer attaches and re-arms the loop.
-                if (consumers.size === 0) sourceDone = false;
-                if (!sourceDone) break;
-                push(item);
+            // One iterator for the stream's lifetime: pausing via `break`
+            // out of `for await` would finish generator-backed sources
+            // permanently, so they could never resume.
+            iterator ??= stream[Symbol.asyncIterator]();
+            const source = iterator;
+            // Deliver an item pulled while the last consumer detached.
+            if (held) {
+                push(held.value);
+                held = undefined;
+            }
+            let sourceDone = false;
+            // Check before pulling: with nobody listening, pause (the
+            // source buffers) without consuming an item; the next attach
+            // resumes this same iterator.
+            while (consumers.size > 0) {
+                const result = await source.next();
+                if (result.done) {
+                    sourceDone = true;
+                    break;
+                }
+                // The last consumer detached while this pull was in
+                // flight: hold the item instead of dropping it.
+                if (consumers.size === 0) {
+                    held = { value: result.value };
+                    break;
+                }
+                push(result.value);
             }
             pulling = false;
             if (!sourceDone) return;
