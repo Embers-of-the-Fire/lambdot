@@ -49,6 +49,14 @@ jobs:
         needs: release-please
         if: needs.release-please.outputs.releases_created != 'true'
         runs-on: ubuntu-latest
+        # Serialize writes to the release branch. The workflow-level group is
+        # keyed on github.ref, so dispatches from different refs (or a
+        # dispatch overlapping a main push) can still check out the same
+        # release-please--branches--main head concurrently — the loser's
+        # git push is then rejected as non-fast-forward. Queue instead.
+        concurrency:
+            group: release-branch-sync
+            cancel-in-progress: false
         steps:
             - uses: actions/checkout@v7
 
