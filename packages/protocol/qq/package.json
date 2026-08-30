@@ -1,6 +1,6 @@
 {
     "name": "@lambdot/protocol-qq",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "type": "module",
     "exports": {
         ".": "./src/index.ts"
@@ -9,8 +9,8 @@
         "access": "public"
     },
     "dependencies": {
-        "@lambdot/core": "0.1.0",
-        "@lambdot/websocket": "0.1.0",
+        "@lambdot/core": "0.2.0",
+        "@lambdot/websocket": "0.2.0",
         "tweetnacl": "^1.0.3"
     }
 }
