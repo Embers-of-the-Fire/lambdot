@@ -1,13 +1,3 @@
-/**
- * The env-capability view the qq plugins declare as `TInjects`: any
- * string-keyed snapshot of variables. `@lambdot/env`'s
- * `EnvCapability<TCap, TKey>` narrows the keys but stays assignable to this,
- * so the fold's capability-type check accepts it.
- */
-export type QqEnvNeeds<TEnvCap extends string> = {
-    readonly [K in TEnvCap]: Readonly<Record<string, string>>;
-};
-
 /** The bot credentials issued by the QQ open platform. */
 export interface QqCredentials {
     readonly appId: string;

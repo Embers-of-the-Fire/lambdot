@@ -1,9 +1,9 @@
 # websocket-bot
 
 A self-verifying echo bot over a real websocket — the reference example for
-lambdot's **typed capability** model: a general transport plugin defers all
-platform behavior to a later spec, shared through the kernel's capability
-fold.
+lambdot's **generic transport** model: a general transport plugin defers
+all platform behavior to a spec, and the pieces are wired together with
+`use`/`bind` mappings.
 
 ```console
 $ nub index.ts
@@ -17,67 +17,78 @@ trip fails — it is its own integration test.
 
 ## What it demonstrates
 
-1. **The transport is a capability, not an input/output.** `wsTransport("ws")`
-   (from `@lambdot/websocket`) owns the socket and nothing else: no event
-   kinds, no addresses, no content contract. It provides the live connection
-   as a typed value under the `ws` capability (`TProvides = WsCapability<"ws">`),
-   so `ctx.provide("ws", connection)` is type-checked and `kernel.ctx.ws`
-   reads back typed.
+1. **The transport is a service, not an input/output.** `wsTransport(name)`
+   (from `@lambdot/websocket`) owns the socket and nothing else: no
+   platform tag, no addresses, no codec. It emits the live `WsConnection`
+   as its output value, so downstream plugins declare it as an ordinary
+   input and receive it through a `mapping`. It is composed with `bind`:
+   internal wiring, hidden from the final `ctx` but visible to later
+   mappings.
 2. **Platform behavior is deferred to a spec.** `WsSpec` carries everything
-   the transport cannot know — the platform tag, the event kind, the frame
-   codec. The generic `wsInput("ws", spec)` / `wsOutput("ws", spec)` factories
-   build the platform halves from it; a second platform (discord, qq, …)
-   costs one spec object, ~15 lines. Event kinds and output contracts still
-   flow through the generic fold, so registration-order gating keeps working.
-3. **The capability name is a parameter, so instances multiply.** Each
-   `wsTransport(name)` provides under its own name; two websocket platforms
-   share a kernel as `WsCapability<"ws-a"> & WsCapability<"ws-b">` in the
-   fold, each platform's plugins gating on their own transport — see
-   `type-test.ts`, and [dual-websocket-bot](../dual-websocket-bot) for the
-   runnable version.
-4. **Typed injection, compile-time gated.** The factories declare
-   `TInjects = WsCapability<"ws">`; inside `apply`, `ctx.ws` is typed with no
-   casts. Registering them before `wsTransport("ws")` is a compile error
-   ("unprovided capabilities"), and a consumer declaring the wrong value type
-   fails with "mismatched capability types" — see `type-test.ts`.
-5. **Runtime activation still applies.** `inject: ["ws"]` keeps the platform
-   plugins pending until the socket connects and provides the connection, and
-   unloads them if the capability is withdrawn — the compile-time gate orders
-   registration, the runtime gate orders activation.
+   the transport cannot know — the platform tag, the address shape, the
+   frame codec. The generic `wsInput(name, spec)` / `wsOutput(name, spec)`
+   factories build the platform halves from it; a second platform (discord,
+   qq, …) costs one spec object, ~15 lines. `wsPlatform(name, spec)`
+   bundles the three leaves.
+3. **Config travels in `option`.** The transport's `{ url }` is its config,
+   passed as `option` at wiring time — required exactly because the config
+   type is non-void, and validated by the plugin's schema. The input and
+   output take no config.
+4. **Instances multiply by name.** Composition namespaces key on strings,
+   so each `wsPlatform(name, spec)` gets its own `name`, `name/transport`,
+   and `name/output` namespaces. Two websocket platforms share a kernel
+   side by side, each platform's input/output mapping to its own
+   transport's connection — see `type-test.ts`, and
+   [dual-websocket-bot](../dual-websocket-bot) for the runnable version.
+   Reusing one name twice is a compile-time "duplicate namespace" error.
+5. **Wiring order is a compile error.** Each `mapping`'s parameter is typed
+   as the namespaces visible so far — `use`d and `bind`ed alike — so wiring
+   the input before the transport (its `connection` source) fails to
+   compile, and `ctx["wsecho"]` is not accepted where `ctx["wsecho/transport"]`
+   is required. `type-test.ts` exercises all of it.
 
 ## The plugin chain
 
-Prefer the bundled form: `wsPlatform(capability, spec)` declares one
-websocket platform as a triple of plugins — the triple stays separate so
-the fold keeps enforcing registration order (transport before the halves
-that inject it):
+Prefer the bundled form: `wsPlatform(name, spec)` declares one websocket
+platform as a triple of plugins — the triple stays separate so the mapping
+types keep enforcing wiring order (transport before the halves that consume
+its connection):
 
 ```ts
-const wsecho = wsPlatform("ws", echoSpec);
+const wsecho = wsPlatform("wsecho", echoSpec);
 
 const kernel = createKernel()
-    .use(wsecho.transport, { url }) // provides { ws: WsConnection }
-    .use(wsecho.input) // ingests "wsecho.message"
-    .use(wsecho.output) // sends through the "wsecho" platform
-    .use(reply); // echoes each message back
+    .bind(wsecho.transport, { option: { url } })
+    .use(wsecho.input, { mapping: (ctx) => ({ connection: ctx["wsecho/transport"] }) })
+    // identity wiring: reply's input keys already match the visible ctx
+    .use(reply)
+    .bind(wsecho.output, {
+        mapping: (ctx) => ({ connection: ctx["wsecho/transport"], commands: ctx.reply }),
+    });
 ```
 
+The input is `use`d, so its message stream is exposed to features under the
+platform name (`kernel.ctx.wsecho`); the reply feature maps it into a
+command stream, exposed as `ctx.reply`. The output is terminal — it
+consumes the reply stream and sends each command's encoded content through
+the connection — so it is `bind`ed last.
+
 Two websocket platforms share one kernel by declaring two bundles under
-distinct capability names, with tagged specs (one factory call per
-instance) so the platform tags and event kinds stay unique:
+distinct names, with tagged specs (one factory call per instance) so the
+platform names and namespaces stay unique:
 
 ```ts
-const wsechoA = wsPlatform("ws-a", echoSpec("a"));
-const wsechoB = wsPlatform("ws-b", echoSpec("b"));
+const wsechoA = wsPlatform("wsecho-a", echoSpec("a"));
+const wsechoB = wsPlatform("wsecho-b", echoSpec("b"));
 
 const kernel = createKernel()
-    .use(wsechoA.transport, { url: urlA })
-    .use(wsechoA.input)
-    .use(wsechoA.output)
-    .use(wsechoB.transport, { url: urlB })
-    .use(wsechoB.input)
-    .use(wsechoB.output)
-    .use(reply);
+    .bind(wsechoA.transport, { option: { url: urlA } })
+    .use(wsechoA.input, { mapping: (ctx) => ({ connection: ctx["wsecho-a/transport"] }) })
+    .bind(wsechoB.transport, { option: { url: urlB } })
+    .use(wsechoB.input, { mapping: (ctx) => ({ connection: ctx["wsecho-b/transport"] }) })
+    .use(reply)
+    .bind(wsechoA.output, { mapping: ... })
+    .bind(wsechoB.output, { mapping: ... });
 ```
 
 This sketch is realized in [dual-websocket-bot](../dual-websocket-bot),
@@ -87,20 +98,20 @@ both sockets concurrently to prove no cross-dispatch.
 The individual `wsTransport` / `wsInput` / `wsOutput` factories the bundle
 wraps stay exported for cases that need the pieces separately — points 1–5
 above describe how each piece works, and `type-test.ts` exercises them
-directly.
+through the bundle.
 
-Swapping in a real platform means replacing `echoSpec` (codec, address shape,
-event vocabulary) and pointing `url` at a gateway — the transport, the
-factories, and the reply feature don't change.
+Swapping in a real platform means replacing `echoSpec` (codec, address
+shape) and pointing `url` at a gateway — the transport, the factories, and
+the reply feature don't change.
 
 ## File layout
 
-| File           | Role                                                                 |
-| -------------- | -------------------------------------------------------------------- |
-| `echo-spec.ts` | The platform's specific half: platform tag, event kind, frame codec. |
-| `server.ts`    | Demo broadcast server standing in for a real chat service.           |
-| `index.ts`     | Composition root: server, kernel, raw-client round trip, self-check. |
-| `type-test.ts` | Compile-time assertions for the generic factories and the fold.      |
+| File           | Role                                                                    |
+| -------------- | ----------------------------------------------------------------------- |
+| `echo-spec.ts` | The platform's specific half: platform tag, address shape, frame codec. |
+| `server.ts`    | Demo broadcast server standing in for a real chat service.              |
+| `index.ts`     | Composition root: server, kernel, raw-client round trip, self-check.    |
+| `type-test.ts` | Compile-time assertions for mapping-based wiring through the bundle.    |
 
 ## Where next
 

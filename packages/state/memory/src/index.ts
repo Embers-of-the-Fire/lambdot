@@ -1,4 +1,5 @@
-import type { FeaturePlugin, StateBackend } from "@lambdot/core";
+import type { Plugin, StateBackend } from "@lambdot/core";
+import { definePlugin } from "@lambdot/core";
 
 interface Entry {
     value: unknown;
@@ -6,17 +7,16 @@ interface Entry {
 }
 
 /**
- * Reference state backend: in-memory, with optional per-key TTL. An
- * ordinary feature plugin — it provides its backend as the runtime-gated
- * `"state"` capability, so stateful features (`inject: ["state"]`) activate
- * only while it is active. At most one state provider may be active.
+ * Reference state backend: in-memory, with optional per-key TTL. An ordinary
+ * plugin emitting the backend as its namespace value — stateful features
+ * declare it in their input and build a typed accessor with
+ * `createStateAccessor(backend, name)`.
  */
-export function memoryState(): FeaturePlugin<{}, {}, undefined, void, "state-memory"> {
-    const store = new Map<string, Entry>();
-
-    return {
-        name: "state-memory",
-        apply(ctx) {
+export function memoryState(): Plugin<void, StateBackend, void, "state"> {
+    return definePlugin({
+        name: "state",
+        apply() {
+            const store = new Map<string, Entry>();
             const backend: StateBackend = {
                 async get(namespace, key) {
                     const entry = store.get(`${namespace}:${key}`);
@@ -36,7 +36,7 @@ export function memoryState(): FeaturePlugin<{}, {}, undefined, void, "state-mem
                     store.delete(`${namespace}:${key}`);
                 },
             };
-            return ctx.provide("state", backend);
+            return backend;
         },
-    };
+    });
 }

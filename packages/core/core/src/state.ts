@@ -1,8 +1,8 @@
 /**
- * Pluggable state. The framework core is stateless; state is an ordinary
- * feature plugin providing its backend as the `"state"` capability (at most
- * one may be active). Plugins declare their schema at the type level and
- * receive a typed accessor namespaced to their plugin name.
+ * Pluggable state. The framework core is stateless; a state plugin is an
+ * ordinary plugin emitting a backend as its namespace value. Stateful
+ * features declare the backend in their input and build a typed accessor
+ * namespaced to their own plugin name via {@link createStateAccessor}.
  */
 export interface StateBackend {
     get(namespace: string, key: string): Promise<unknown>;
@@ -20,25 +20,6 @@ export interface StateAccessor<TSchema> {
     ): Promise<void>;
     delete(key: keyof TSchema & string): Promise<void>;
 }
-
-/**
- * Marker type for `ctx.state` when no plugin declared a state schema —
- * "stateless by default" is enforced at compile time. Any access errors with
- * this type's name in the message.
- */
-export interface NoStateDeclared {
-    readonly "no state schema declared": "register a feature plugin with a TStateSchema to enable ctx.state";
-}
-
-/**
- * `ctx.state`. Folds to {@link NoStateDeclared} when no plugin declared a
- * state schema.
- */
-export type StateView<TState extends object> = keyof TState extends never
-    ? NoStateDeclared
-    : {
-          for<TName extends keyof TState & string>(plugin: TName): StateAccessor<TState[TName]>;
-      };
 
 export function createStateAccessor<TSchema>(
     backend: StateBackend,

@@ -1,16 +1,24 @@
-import { consolePlatform, type ConsoleEvents, type ConsoleOutputs } from "@lambdot/console";
-import { createKernel, definePlugin } from "@lambdot/core";
+import { consolePlatform, type ConsoleLine } from "@lambdot/console";
+import type { Stream } from "@lambdot/core";
+import { createKernel, definePlugin, mapStream } from "@lambdot/core";
 
-const echo = definePlugin<ConsoleEvents, ConsoleOutputs>({
+const echo = definePlugin({
     name: "echo",
-    apply(ctx) {
-        return ctx.on("console.line", (event) => ctx.send(event.address, `echo: ${event.payload}`));
+    apply(input: { "console/lines": Stream<ConsoleLine> }) {
+        return mapStream(input["console/lines"], (event) => ({
+            address: event.address,
+            content: `echo: ${event.payload}`,
+        }));
     },
 });
 
 const cli = consolePlatform();
 
-const kernel = createKernel().use(cli.input).use(cli.output).use(echo);
+const kernel = createKernel()
+    .use(cli.lines)
+    // identity wiring: echo's input keys already match the visible ctx
+    .use(echo)
+    .bind(cli.printer, { mapping: (ctx) => ({ replies: ctx.echo }) });
 
 await kernel.start();
 

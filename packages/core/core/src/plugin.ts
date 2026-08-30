@@ -1,225 +1,177 @@
-import type {
-    Address,
-    ContextView,
-    InputContext,
-    OutputContract,
-    OutputContractMap,
-} from "./context.ts";
-import type { Effect } from "./effect.ts";
-import type { EventMap } from "./events.ts";
+import type { Disposer } from "./effect.ts";
 import type { StandardSchemaV1 } from "./schema.ts";
 
 /**
- * The `inject` requirement: once a plugin declares typed capability needs
- * (`TInjects`), the runtime `inject` array is restricted to exactly those
- * names — the runtime gate and the type-level gate cannot drift apart.
- * Plugins with no declared needs keep the loose string form (the
- * runtime-only capability path, e.g. `inject: ["state"]`).
+ * Per-activation services handed to a plugin's `apply`: collect disposers
+ * (run when the owning plugin unloads, in reverse order) and report errors
+ * from background work (stream pumps, timers).
  */
-type InjectNames<TInjects extends object> = [keyof TInjects & string] extends [never]
-    ? readonly string[]
-    : readonly (keyof TInjects & string)[];
+export interface Scope {
+    onDispose(disposer: Disposer): void;
+    onError(error: unknown): void;
+}
 
-/** Metadata understood by the kernel, shared by all plugin roles. */
-export interface PluginMeta<TConfig, TInjects extends object = {}> {
-    readonly name: string;
-    /** Capabilities that must be provided before this plugin activates. */
-    readonly inject?: InjectNames<TInjects>;
-    /**
-     * Capability names this plugin provides once active. Provided valueless
-     * by the kernel after `apply`; to provide a typed value, declare
-     * `TProvides` and call `ctx.provide(name, value)` in `apply` instead.
-     */
-    readonly provide?: string | readonly string[];
-    /** Standard-Schema validator applied to config before `apply` runs. */
+/**
+ * The author-facing half of a plugin: a name (its namespace key once
+ * composed), an optional Standard-Schema config validator, and `apply` —
+ * the function from the plugin's declared input to its emitted output.
+ */
+export interface PluginSpec<TIn, TOut, TConfig, TName extends string> {
+    readonly name: TName;
     readonly Config?: StandardSchemaV1<unknown, TConfig>;
+    apply(input: TIn, scope: Scope, config: TConfig): TOut | Promise<TOut>;
 }
 
 /**
- * Produces events of the kinds in `TEvents`. Knows how to listen, nothing
- * else. May declare typed capabilities it provides (`TProvides`) and
- * consumes (`TInjects` — folded into its `apply` context, gated at `use()`).
+ * A plugin is a function: `apply` maps its declared input (`TIn`, a record
+ * of namespaces it consumes) to its output (`TOut`, the value it emits).
+ * Composition methods (`use`/`bind`) build bigger plugins out of smaller
+ * ones; `start`/`stop`/`ctx` make any plugin runnable on its own.
  */
-export interface InputPlugin<
-    TEvents extends EventMap = EventMap,
-    TConfig = void,
-    TName extends string = string,
-    TProvides extends object = {},
-    TInjects extends object = {},
-> extends PluginMeta<TConfig, TInjects> {
-    readonly role: "input";
+export interface Plugin<TIn = void, TOut = unknown, TConfig = void, TName extends string = string> {
     readonly name: TName;
-    apply(ctx: InputContext<TEvents, TProvides> & TInjects, config: TConfig): Effect;
-}
+    readonly Config?: StandardSchemaV1<unknown, TConfig>;
+    apply(input: TIn, scope: Scope, config: TConfig): TOut | Promise<TOut>;
 
-/** Consumes addresses of its platform. Reply semantics live in `TContent`, not the core. */
-export interface OutputPlugin<
-    TPlatform extends string = string,
-    TAddress extends Address<TPlatform> = Address<TPlatform>,
-    TContent = unknown,
-    TConfig = void,
-    TName extends string = string,
-    TProvides extends object = {},
-    TInjects extends object = {},
-> extends PluginMeta<TConfig, TInjects> {
-    readonly role: "output";
-    readonly name: TName;
-    readonly platform: TPlatform;
-    send(to: TAddress, content: TContent): void | Promise<void>;
-    apply?(ctx: ContextView<{}, {}, {}, TProvides> & TInjects, config: TConfig): Effect;
+    /** Feed `unit` from the visible context and expose its output under `as` (default: its name). */
+    use<const TUnit extends AnyUnit, TAs extends string = NameOf<TUnit>>(
+        unit: TUnit & FreshName<TAs, { [K in TName]: TOut }>,
+        ...args: WireArgs<TUnit, InputPart<TIn> & { [K in TName]: TOut }, TAs>
+    ): Composite<TIn, { [K in TName]: TOut } & { [K in TAs]: OutOf<TUnit> }, {}, TName>;
+
+    /** Like {@link use}, but the unit's output stays internal to the composition. */
+    bind<const TUnit extends AnyUnit, TAs extends string = NameOf<TUnit>>(
+        unit: TUnit & FreshName<TAs, { [K in TName]: TOut }>,
+        ...args: WireArgs<TUnit, InputPart<TIn> & { [K in TName]: TOut }, TAs>
+    ): Composite<TIn, { [K in TName]: TOut }, { [K in TAs]: OutOf<TUnit> }, TName>;
+
+    start(...args: StartArgs<TIn>): Promise<void>;
+    stop(): Promise<void>;
+    /** The exposed namespaces. Populated during `start`; typed regardless. */
+    readonly ctx: { [K in TName]: TOut };
 }
 
 /**
- * A unit of behavior. Declares the event kinds it handles (`TNeeds`), the
- * output platforms it sends through (`TSends`), and optionally a state
- * schema (`TStateSchema`) and typed capabilities: `TProvides` (read back
- * through `CapsOf` at the kernel fold; `provide` is type-checked against
- * it) and `TInjects` (folded into the `apply` context; the kernel checks
- * at `use()` time that the fold so far provides them).
+ * A composed chain of plugins — itself wireable like a plugin: its input is
+ * the chain's external requirement, its output is the visible context
+ * (`TVisible`). `THidden` carries the `bind`-encapsulated namespaces:
+ * visible to later `mapping`s inside the chain, absent from the final `ctx`.
+ * Structural sibling of {@link Plugin} (the conditional wire types do not
+ * survive interface extension).
  */
-export interface FeaturePlugin<
-    TNeeds extends EventMap = {},
-    TSends extends OutputContractMap = {},
-    TStateSchema = undefined,
-    TConfig = void,
-    TName extends string = string,
-    TProvides extends object = {},
-    TInjects extends object = {},
-> extends PluginMeta<TConfig, TInjects> {
-    readonly role?: "feature";
+export interface Composite<TIn = void, TVisible = {}, THidden = {}, TName extends string = string> {
     readonly name: TName;
-    apply(
-        ctx: ContextView<
-            TNeeds,
-            TSends,
-            TStateSchema extends undefined ? {} : { [K in TName]: TStateSchema },
-            TProvides
-        > &
-            TInjects,
-        config: TConfig,
-    ): Effect;
+    apply(input: TIn, scope: Scope, config: void): Promise<TVisible>;
+
+    use<const TUnit extends AnyUnit, TAs extends string = NameOf<TUnit>>(
+        unit: TUnit & FreshName<TAs, TVisible & THidden>,
+        ...args: WireArgs<TUnit, InputPart<TIn> & TVisible & THidden, TAs>
+    ): Composite<TIn, TVisible & { [K in TAs]: OutOf<TUnit> }, THidden, TName>;
+
+    bind<const TUnit extends AnyUnit, TAs extends string = NameOf<TUnit>>(
+        unit: TUnit & FreshName<TAs, TVisible & THidden>,
+        ...args: WireArgs<TUnit, InputPart<TIn> & TVisible & THidden, TAs>
+    ): Composite<TIn, TVisible, THidden & { [K in TAs]: OutOf<TUnit> }, TName>;
+
+    start(...args: StartArgs<TIn>): Promise<void>;
+    stop(): Promise<void>;
+    readonly ctx: TVisible;
 }
 
-export type AnyPlugin =
-    | InputPlugin<any, any, any, any, any>
-    | OutputPlugin<any, any, any, any, any, any, any>
-    | FeaturePlugin<any, any, any, any, any, any, any>;
+export type AnyUnit = Plugin<any, any, any, any> | Composite<any, any, any, any>;
+
+/** The kernel is a composition seeded empty: `createKernel().use(...)`. */
+export type Kernel<TVisible = {}, THidden = {}> = Composite<void, TVisible, THidden, "kernel">;
 
 /* ------------------------------------------------------------------ */
-/* Type-level fold: how each plugin shapes the kernel's type params    */
+/* Type-level plumbing                                                 */
 /* ------------------------------------------------------------------ */
 
-export type EventsOf<TPlugin> =
-    TPlugin extends InputPlugin<infer TEvents, any, any, any, any> ? TEvents : {};
-
-export type OutputsOf<TPlugin> =
-    TPlugin extends OutputPlugin<
-        infer TPlatform,
-        infer TAddress,
-        infer TContent,
-        any,
-        any,
-        any,
-        any
-    >
-        ? { [K in TPlatform]: OutputContract<TAddress, TContent> }
-        : {};
-
-export type StateOf<TPlugin> =
-    TPlugin extends FeaturePlugin<any, any, infer TStateSchema, any, infer TName, any, any>
-        ? TStateSchema extends undefined
-            ? {}
-            : { [K in TName]: TStateSchema }
-        : {};
-
-/** Typed capabilities a plugin provides, folded into the kernel's `TCaps`. */
-export type CapsOf<TPlugin> =
-    TPlugin extends FeaturePlugin<any, any, any, any, any, infer TProvides, any>
-        ? TProvides
-        : TPlugin extends InputPlugin<any, any, any, infer TProvides, any>
-          ? TProvides
-          : TPlugin extends OutputPlugin<any, any, any, any, any, infer TProvides, any>
-            ? TProvides
-            : {};
-
-/** Typed capabilities a plugin consumes, gated against the fold at `use()`. */
-export type InjectsOf<TPlugin> =
-    TPlugin extends FeaturePlugin<any, any, any, any, any, any, infer TInjects>
-        ? TInjects
-        : TPlugin extends InputPlugin<any, any, any, any, infer TInjects>
-          ? TInjects
-          : TPlugin extends OutputPlugin<any, any, any, any, any, any, infer TInjects>
-            ? TInjects
-            : {};
-
-/** Config type: from the schema if present, else from `apply`'s second parameter. */
-export type ConfigOf<TPlugin> = TPlugin extends { Config: StandardSchemaV1<any, infer TOutput> }
-    ? TOutput
-    : TPlugin extends { apply: (ctx: any, config: infer TConfig) => any }
+/**
+ * Inference helpers work structurally over `apply`, so they read both leaf
+ * plugins and composites (which carry no declared config — `void`).
+ */
+export type InOf<TUnit> = TUnit extends {
+    apply(input: infer TIn, scope: any, config: any): any;
+}
+    ? TIn
+    : never;
+export type OutOf<TUnit> = TUnit extends {
+    apply(input: any, scope: any, config: any): infer TOut;
+}
+    ? Awaited<TOut>
+    : never;
+export type ConfigOf<TUnit> = TUnit extends { Config?: StandardSchemaV1<any, infer TConfig> }
+    ? unknown extends TConfig
+        ? void
+        : TConfig
+    : TUnit extends { apply(input: any, scope: any, config: infer TConfig): any }
       ? unknown extends TConfig
           ? void
           : TConfig
       : void;
+export type NameOf<TUnit> = TUnit extends { readonly name: infer TName extends string }
+    ? TName
+    : never;
 
-/** Makes the config argument optional exactly when `void` is assignable to it. */
-export type Spread<T> = [T] extends [void] ? [config?: T] : [config: T];
-
-type NeedsOf<TPlugin> =
-    TPlugin extends FeaturePlugin<infer TNeeds, any, any, any, any, any, any> ? TNeeds : {};
-type SendsOf<TPlugin> =
-    TPlugin extends FeaturePlugin<any, infer TSends, any, any, any, any, any> ? TSends : {};
-
-type MissingKeys<TDeclared extends object, TRegistered extends object> = Exclude<
+type MissingKeys<TDeclared, TRegistered> = Exclude<
     keyof TDeclared & string,
     keyof TRegistered & string
 >;
 
-/** Declared capability keys whose value types don't match the folded capability. */
-type MismatchedKeys<TDeclared extends object, TRegistered extends object> = {
+/** Declared input keys whose value types don't match the visible context. */
+type MismatchedKeys<TDeclared, TRegistered> = {
     [K in keyof TDeclared & string]: K extends keyof TRegistered & string
-        ? TDeclared[K] extends TRegistered[K]
+        ? TRegistered[K] extends TDeclared[K]
             ? never
             : K
         : never;
 }[keyof TDeclared & string];
 
 /**
- * Compile-time gate on `use()`: a plugin can only be registered once every
- * event kind it handles, every output platform it sends through, and every
- * typed capability it injects is already in the fold — with a compatible
- * value type.
+ * Whether identity wiring (no `mapping`) can feed a unit expecting `TIn`
+ * from the currently visible context: every declared key present, with a
+ * compatible value type.
  */
-export type Validate<
-    TPlugin,
-    TEvents extends EventMap,
-    TOutputs extends OutputContractMap,
-    TCaps extends object,
-> = [MissingKeys<NeedsOf<TPlugin>, TEvents>] extends [never]
-    ? [MissingKeys<SendsOf<TPlugin>, TOutputs>] extends [never]
-        ? [MissingKeys<InjectsOf<TPlugin>, TCaps>] extends [never]
-            ? [MismatchedKeys<InjectsOf<TPlugin>, TCaps>] extends [never]
-                ? unknown
-                : {
-                      readonly "mismatched capability types": MismatchedKeys<
-                          InjectsOf<TPlugin>,
-                          TCaps
-                      >;
-                  }
-            : { readonly "unprovided capabilities": MissingKeys<InjectsOf<TPlugin>, TCaps> }
-        : { readonly "unregistered output platforms": MissingKeys<SendsOf<TPlugin>, TOutputs> }
-    : { readonly "unregistered event kinds": MissingKeys<NeedsOf<TPlugin>, TEvents> };
+type Satisfied<TIn, TAvailable> = [keyof TIn & string] extends [never]
+    ? true
+    : [MissingKeys<TIn, TAvailable>] extends [never]
+      ? [MismatchedKeys<TIn, TAvailable>] extends [never]
+          ? true
+          : false
+      : false;
 
-/** Identity helper for authoring feature plugins with precise generics. */
-export function definePlugin<
-    TNeeds extends EventMap = {},
-    TSends extends OutputContractMap = {},
-    TStateSchema = undefined,
-    TConfig = void,
-    TName extends string = string,
-    TProvides extends object = {},
-    TInjects extends object = {},
->(
-    plugin: FeaturePlugin<TNeeds, TSends, TStateSchema, TConfig, TName, TProvides, TInjects>,
-): typeof plugin {
-    return plugin;
-}
+/** Compile error marker when a namespace key is already taken in the chain. */
+type FreshName<TName extends string, TTaken> = TName extends keyof TTaken & string
+    ? { readonly "duplicate namespace": TName }
+    : unknown;
+
+/** `void` inputs contribute nothing to the mapping's context type. */
+type InputPart<TIn> = [TIn] extends [void] ? {} : TIn;
+
+/** Adds `option` to the wire options, required exactly when the unit's config is non-void. */
+type WithOption<TUnit, TBase extends object> = [ConfigOf<TUnit>] extends [void]
+    ? TBase & { option?: ConfigOf<TUnit> }
+    : TBase & { option: ConfigOf<TUnit> };
+
+/**
+ * The trailing arguments of `use`/`bind`. `mapping` rewires the visible
+ * context into the unit's declared input — required when identity wiring
+ * cannot satisfy it, optional otherwise. `option` carries the unit's
+ * config, required exactly when the config type is non-void. `as` renames
+ * the namespace the unit's output is stored under.
+ */
+export type WireArgs<TUnit extends AnyUnit, TAvailable, TAs extends string> =
+    Satisfied<InOf<TUnit>, TAvailable> extends true
+        ? [ConfigOf<TUnit>] extends [void]
+            ? [
+                  options?: WithOption<
+                      TUnit,
+                      { mapping?: (ctx: TAvailable) => InOf<TUnit>; as?: TAs }
+                  >,
+              ]
+            : [options: WithOption<TUnit, { mapping?: (ctx: TAvailable) => InOf<TUnit>; as?: TAs }>]
+        : [options: WithOption<TUnit, { mapping: (ctx: TAvailable) => InOf<TUnit>; as?: TAs }>];
+
+/** `start` takes the composition's external input exactly when it declares one. */
+export type StartArgs<TIn> = [TIn] extends [void] ? [] : [input: TIn];

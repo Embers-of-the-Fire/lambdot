@@ -3,7 +3,7 @@
 A self-verifying echo bot speaking the real QQ webhook (reversed-post)
 protocol against a fake open platform — the reference example for embedding
 a kernel into an HTTP host: the input owns no port, the callback algorithm
-is a typed capability, and a hono route is the whole integration.
+is a typed namespace value, and a hono route is the whole integration.
 
 ```console
 $ nub run -F @lambdot-example/qq-webhook-bot start
@@ -20,15 +20,16 @@ that match the secret the fake platform signs with.
 
 ## What it demonstrates
 
-1. **The input is a capability, not a server.** `qqWebhookInput` binds no
-   port and owns no HTTP surface. It registers the qq event kinds and
-   provides a `QqWebhook` capability — one `handle(request): Promise<Response>`
-   method implementing the callback algorithm. The HTTP route lives outside
-   the event pipeline and hands each callback request to `handle`:
+1. **The input is a namespace value, not a server.** `qq.webhook` binds no
+   port and owns no HTTP surface. It emits a `QqWebhook` — a
+   `handle(request): Promise<Response>` method implementing the callback
+   algorithm, plus the `messages` stream decoded dispatches are pushed to.
+   The HTTP route lives outside the composition and hands each callback
+   request to `handle`:
 
     ```ts
     const app = new Hono();
-    app.post("/qq/callback", (c) => kernel.ctx["qq-webhook"].handle(c.req.raw));
+    app.post("/qq/callback", (c) => kernel.ctx.qq.handle(c.req.raw));
     ```
 
     That bridge is the entire reversed-post integration; the same kernel
@@ -52,47 +53,53 @@ that match the secret the fake platform signs with.
    and setting real credentials.
 4. **Same events, same output, different transport.** Gateway and webhook
    deliver the same `{ op, t, d }` envelope, so both inputs share
-   `decodeMessageEvent` and produce the same `qq.group-message` /
-   `qq.c2c-message` kinds; the reply feature is byte-for-byte identical to
-   the gateway example's, and the passive-reply contract (address carries
-   `msgId`, output auto-increments `msg_seq`) is asserted the same way via
-   the recorded message.
-5. **The fold gates the chain at compile time.** `type-test.ts` asserts
-   that the provided capabilities read back typed
-   (`kernel.ctx["qq-webhook"]: QqWebhook`, `kernel.ctx["qq-api"]: QqApi`),
-   that `ctx.send` rejects non-string content and foreign-platform
-   addresses, and that registration order is enforced through the bundle:
-   env provider → webhook → api → output → features. Every
-   `@ts-expect-error` line there is a genuine error — if one stops
-   erroring, the fold regressed; fix the types, not the test.
+   `decodeMessageEvent` and produce the same `QqMessageStream`; the reply
+   feature is byte-for-byte identical to the gateway example's (only its
+   `mapping` differs — the webhook emits `{ handle, messages }` under
+   `ctx.qq`, so the adapter reads `ctx.qq.messages`), and the passive-reply
+   contract (address carries `msgId`, output auto-increments `msg_seq`) is
+   asserted the same way via the recorded message.
+5. **The mapping types gate the chain at compile time.** `type-test.ts`
+   asserts that the exposed namespaces read back typed
+   (`kernel.ctx.qq: QqWebhook`), that `bind`ed namespaces (`qq/api`,
+   `qq/output`) are hidden from the final `ctx`, that `mapping` is required
+   when a declared input key is absent (no `env` namespace; no `messages`
+   namespace), and that `option` is required even with a mapping (pass `{}`
+   for defaults). Every `@ts-expect-error` line there is a genuine error —
+   if one stops erroring, the types regressed; fix the types, not the test.
 
 ## The plugin chain
 
 ```ts
-const qq = qqWebhookPlatform({ webhook: "qq-webhook", api: "qq-api", env: "qq-env" });
+const qq = qqWebhookPlatform("qq");
 
 const kernel = createKernel()
     .use(envVars("qq-env", ["QQ_BOT_APP_ID", "QQ_BOT_APP_SECRET"]))
-    .use(qq.webhook, {}) // provides the QqWebhook callback handler
-    .use(qq.api, { apiBase: platform.apiBase }) // provides QqApi
-    .use(qq.output) // sends through the "qq" platform
-    .use(reply); // echoes each message back
+    .use(qq.webhook, { option: {}, mapping: (ctx) => ({ env: ctx["qq-env"] }) })
+    .bind(qq.api, {
+        option: { apiBase: platform.apiBase },
+        mapping: (ctx) => ({ env: ctx["qq-env"] }),
+    })
+    // the mapping is the platform adapter: reply wants "messages", the
+    // webhook emits { handle, messages }
+    .use(reply, { mapping: (ctx) => ({ messages: ctx.qq.messages }) })
+    .bind(qq.output, { mapping: (ctx) => ({ api: ctx["qq/api"], commands: ctx.reply }) });
 ```
 
 There is no transport plugin: QQ pushes events to the bot, so receiving is
-the hono route calling the webhook capability, and sending is always an
-HTTPS call through the api capability. The example then runs its three
+the hono route calling the webhook's `handle`, and sending is always an
+HTTPS call through the api service. The example then runs its three
 self-checks in order — op-13 callback validation, the signed echo round
 trip (platform → webhook → reply feature → output → REST mock), and the
 tampered-signature refusal — before stopping the kernel.
 
 ## File layout
 
-| File           | Role                                                                    |
-| -------------- | ----------------------------------------------------------------------- |
-| `index.ts`     | The bot: kernel setup, the hono bridge, self-checking driver.           |
-| `platform.ts`  | Fake QQ open platform: REST mock plus the signing callback client.      |
-| `type-test.ts` | Compile-time assertions for the bundle's capability chain and the fold. |
+| File           | Role                                                               |
+| -------------- | ------------------------------------------------------------------ |
+| `index.ts`     | The bot: kernel setup, the hono bridge, self-checking driver.      |
+| `platform.ts`  | Fake QQ open platform: REST mock plus the signing callback client. |
+| `type-test.ts` | Compile-time assertions for the bundle's mapping-wired chain.      |
 
 ## See also
 
@@ -102,6 +109,6 @@ tampered-signature refusal — before stopping the kernel.
 - [`../../packages/protocol/qq`](../../packages/protocol/qq) — the protocol
   package: `qqGatewayPlatform`/`qqWebhookPlatform` bundles, the REST client,
   and the shared event decoder.
-- [`../websocket-bot`](../websocket-bot) — the typed-capability model the
-  webhook capability follows (provided values read back typed on
+- [`../websocket-bot`](../websocket-bot) — the mapping-wiring model the
+  webhook plugin follows (exposed namespace values read back typed on
   `kernel.ctx`).

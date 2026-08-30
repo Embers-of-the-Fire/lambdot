@@ -1,28 +1,32 @@
-import type { ConsoleAddress, ConsoleEvents, ConsoleOutputs } from "@lambdot/console";
-import type { BotEvent } from "@lambdot/core";
-import { definePlugin } from "@lambdot/core";
+import type { ConsoleLine } from "@lambdot/console";
+import type { Message, Stream } from "@lambdot/core";
+import { definePlugin, mapStream, mergeStreams } from "@lambdot/core";
 
-import type { EchoEvents, EchoOutputs, WsEchoAddress } from "./echo-spec.ts";
+import type { WsEchoAddress } from "./echo-spec.ts";
 
 /**
  * The point of this example: one echo behavior, two platforms. The feature
- * declares the union of both platforms' event kinds and output contracts;
- * the kernel's type fold checks at `use()` time that all four platform
- * halves were registered first.
+ * declares both platforms' message streams as its input and merges them into
+ * one command stream; each output filters the commands back down to its own
+ * platform tag at wiring time.
  *
  * The handler is platform-agnostic because the envelope carries its own
- * return address: `ctx.send(event.address, ...)` routes back through
- * whichever output owns the address's `platform` tag. `ContentFor`
- * distributes over the address union, so `send` type-checks for both
- * platforms through the same handler (both contracts accept `string`).
+ * return address: the command's `address` routes the reply back through
+ * whichever output claims the address's `platform` tag.
  */
-export const echo = definePlugin<ConsoleEvents & EchoEvents, ConsoleOutputs & EchoOutputs>({
+export const echo = definePlugin({
     name: "echo",
-    apply(ctx) {
-        function reply(event: BotEvent<string, string, ConsoleAddress | WsEchoAddress>) {
-            return ctx.send(event.address, `echo: ${event.payload}`);
+    apply(input: {
+        "console/lines": Stream<ConsoleLine>;
+        wsecho: Stream<Message<string, WsEchoAddress>>;
+    }) {
+        function reply(event: Message<string, ConsoleLine["address"] | WsEchoAddress>) {
+            return { address: event.address, content: `echo: ${event.payload}` };
         }
 
-        return [ctx.on("console.line", reply), ctx.on("wsecho.message", reply)];
+        return mergeStreams(
+            mapStream(input["console/lines"], reply),
+            mapStream(input.wsecho, reply),
+        );
     },
 });

@@ -1,6 +1,6 @@
-import { createKernel, definePlugin } from "@lambdot/core";
+import { createKernel, definePlugin, mapStream } from "@lambdot/core";
 import { envVars } from "@lambdot/env";
-import { qqGatewayPlatform, type QqEvents, type QqOutputs } from "@lambdot/protocol-qq";
+import { qqGatewayPlatform, type QqMessageStream } from "@lambdot/protocol-qq";
 
 import { startFakeQqPlatform } from "./platform.ts";
 
@@ -9,31 +9,34 @@ import { startFakeQqPlatform } from "./platform.ts";
 process.env.QQ_BOT_APP_ID ??= "102000001";
 process.env.QQ_BOT_APP_SECRET ??= "fake-bot-secret";
 
-const reply = definePlugin<QqEvents, QqOutputs>({
+const reply = definePlugin({
     name: "reply",
-    apply(ctx) {
-        return [
-            ctx.on("qq.group-message", (event) =>
-                ctx.send(event.address, `echo: ${event.payload.content}`),
-            ),
-            ctx.on("qq.c2c-message", (event) =>
-                ctx.send(event.address, `echo: ${event.payload.content}`),
-            ),
-        ];
+    apply(input: { messages: QqMessageStream }) {
+        return mapStream(input.messages, (event) => ({
+            address: event.address,
+            content: `echo: ${event.payload.content}`,
+        }));
     },
 });
 
-const qq = qqGatewayPlatform({ ws: "qq-ws", api: "qq-api", env: "qq-env" });
+const qq = qqGatewayPlatform("qq");
 
 const platform = await startFakeQqPlatform();
 
 const kernel = createKernel()
     .use(envVars("qq-env", ["QQ_BOT_APP_ID", "QQ_BOT_APP_SECRET"]))
-    .use(qq.api, { apiBase: platform.apiBase })
-    .use(qq.transport)
-    .use(qq.input, {})
-    .use(qq.output)
-    .use(reply);
+    .bind(qq.api, {
+        option: { apiBase: platform.apiBase },
+        mapping: (ctx) => ({ env: ctx["qq-env"] }),
+    })
+    .bind(qq.transport, { mapping: (ctx) => ({ api: ctx["qq/api"] }) })
+    .use(qq.input, {
+        option: {},
+        mapping: (ctx) => ({ connection: ctx["qq/transport"], api: ctx["qq/api"] }),
+    })
+    // the mapping is the platform adapter: reply wants "messages", qq emits "qq"
+    .use(reply, { mapping: (ctx) => ({ messages: ctx.qq }) })
+    .bind(qq.output, { mapping: (ctx) => ({ api: ctx["qq/api"], commands: ctx.reply }) });
 
 await kernel.start();
 // The bot identifies only after the platform's hello; wait for READY.

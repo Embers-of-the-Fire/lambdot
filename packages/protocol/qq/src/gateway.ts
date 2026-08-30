@@ -1,8 +1,10 @@
-import type { Disposer, FeaturePlugin, InputPlugin } from "@lambdot/core";
-import type { WsCapability, WsConnection } from "@lambdot/websocket";
+import type { Message, Plugin } from "@lambdot/core";
+import { channel, definePlugin, message, shareStream } from "@lambdot/core";
+import type { WsConnection } from "@lambdot/websocket";
 
-import type { QqCapability } from "./api.ts";
-import { decodeMessageEvent, type QqEvents } from "./events.ts";
+import type { QqApi } from "./api.ts";
+import type { QqAddress, QqMessage, QqMessageStream } from "./events.ts";
+import { decodeMessageEvent } from "./events.ts";
 
 /** `GROUP_AND_C2C_EVENT` (1 << 25): group at-messages and C2C messages. */
 export const QQ_INTENT_GROUP_AND_C2C = 1 << 25;
@@ -11,31 +13,21 @@ export const QQ_INTENT_GROUP_AND_C2C = 1 << 25;
  * The qq-specific half of the transport: unlike the generic `wsTransport`,
  * the gateway URL is not static configuration — it is discovered through the
  * REST client (`GET /gateway` with the access token). Resolves the URL at
- * activation, owns the socket, and provides the connection as a typed
- * `WsCapability` so the input can ride it. Register after the api:
- *
+ * activation, owns the socket, and emits the connection so the input can
+ * ride it. Wire the api through the mapping:
+
  * ```ts
- * .use(qqApi("qq-api", "qq-env"))
- * .use(qqGatewayTransport("qq-ws", "qq-api"))
+ * .bind(qqApi("qq/api"), ...)
+ * .bind(qqGatewayTransport("qq/transport"), { mapping: (ctx) => ({ api: ctx["qq/api"] }) })
  * ```
  */
-export function qqGatewayTransport<TWsCap extends string, TApiCap extends string>(
-    capability: TWsCap,
-    api: TApiCap,
-): FeaturePlugin<
-    {},
-    {},
-    undefined,
-    void,
-    `qq-gateway-transport:${TWsCap}`,
-    WsCapability<TWsCap>,
-    QqCapability<TApiCap>
-> {
-    return {
-        name: `qq-gateway-transport:${capability}`,
-        inject: [api],
-        async apply(ctx) {
-            const url = await ctx[api].gatewayUrl();
+export function qqGatewayTransport<const TName extends string>(
+    name: TName,
+): Plugin<{ api: QqApi }, WsConnection, void, TName> {
+    return definePlugin({
+        name,
+        async apply(input, scope) {
+            const url = await input.api.gatewayUrl();
             const socket = new WebSocket(url);
             await new Promise<void>((resolve, reject) => {
                 socket.addEventListener("open", () => resolve(), { once: true });
@@ -45,36 +37,21 @@ export function qqGatewayTransport<TWsCap extends string, TApiCap extends string
                     { once: true },
                 );
             });
-
-            const listeners = new Set<(data: string) => void>();
-            socket.addEventListener("message", (event) => {
-                if (typeof event.data !== "string") return;
-                for (const listener of listeners) listener(event.data);
+            scope.onDispose(() => {
+                socket.close();
             });
 
-            const connection: WsConnection = {
+            return {
                 url,
                 send: (data) => socket.send(data),
                 onMessage(listener) {
-                    listeners.add(listener);
-                    return () => {
-                        listeners.delete(listener);
-                    };
+                    socket.addEventListener("message", (event) => {
+                        if (typeof event.data === "string") listener(event.data);
+                    });
                 },
             };
-
-            // See `wsTransport` in @lambdot/websocket for why `provide` is pinned here.
-            const unprovide = (ctx.provide as (name: TWsCap, value: WsConnection) => Disposer).call(
-                ctx,
-                capability,
-                connection,
-            );
-            return () => {
-                socket.close();
-                void unprovide();
-            };
         },
-    };
+    });
 }
 
 export interface QqGatewayInputConfig {
@@ -83,33 +60,25 @@ export interface QqGatewayInputConfig {
 }
 
 /**
- * The receiving half of the gateway infra: consumes the connection provided
+ * The receiving half of the gateway infra: consumes the connection emitted
  * by {@link qqGatewayTransport} and runs the basic gateway algorithm —
  * identify on hello (op 10), heartbeat on the advertised interval (op 1),
- * decode dispatches (op 0) into message events. Resume (op 6) is deliberately
- * not implemented: a dropped connection is a fresh identify.
+ * decode dispatches (op 0) into the emitted message stream. Resume (op 6) is
+ * deliberately not implemented: a dropped connection is a fresh identify.
  */
-export function qqGatewayInput<TWsCap extends string, TApiCap extends string>(
-    ws: TWsCap,
-    api: TApiCap,
-): InputPlugin<
-    QqEvents,
-    QqGatewayInputConfig,
-    "qq-gateway-input",
-    {},
-    WsCapability<TWsCap> & QqCapability<TApiCap>
-> {
-    return {
-        role: "input",
-        name: "qq-gateway-input",
-        inject: [ws, api],
-        apply(ctx, config) {
-            const connection = ctx[ws];
+export function qqGatewayInput<const TName extends string>(
+    name: TName,
+): Plugin<{ connection: WsConnection; api: QqApi }, QqMessageStream, QqGatewayInputConfig, TName> {
+    return definePlugin({
+        name,
+        apply(input, scope, config) {
+            const { connection, api } = input;
             const intents = config.intents ?? QQ_INTENT_GROUP_AND_C2C;
+            const out = channel<Message<QqMessage, QqAddress>>();
             let lastSeq: number | null = null;
             let heartbeat: ReturnType<typeof setInterval> | undefined;
 
-            const unsubscribe = connection.onMessage((data) => {
+            connection.onMessage((data) => {
                 let frame: { op?: unknown; d?: unknown; s?: unknown; t?: unknown };
                 try {
                     frame = JSON.parse(data) as typeof frame;
@@ -126,7 +95,7 @@ export function qqGatewayInput<TWsCap extends string, TApiCap extends string>(
                             typeof d?.heartbeat_interval === "number"
                                 ? d.heartbeat_interval
                                 : 45_000;
-                        void ctx[api].accessToken().then((token) => {
+                        void api.accessToken().then((token) => {
                             connection.send(
                                 JSON.stringify({
                                     op: 2,
@@ -145,21 +114,22 @@ export function qqGatewayInput<TWsCap extends string, TApiCap extends string>(
                         break;
                     }
                     case 0: {
-                        // Dispatch: message events become lambdot events.
+                        // Dispatch: message frames join the emitted stream.
                         if (typeof frame.t !== "string") break;
                         const decoded = decodeMessageEvent(frame.t, frame.d);
-                        if (decoded)
-                            void ctx.ingest(decoded.kind, decoded.payload, decoded.address);
+                        if (decoded) out.push(message(decoded.payload, decoded.address));
                         break;
                     }
                     // 11 is a heartbeat ack; every other opcode needs no handling.
                 }
             });
 
-            return () => {
+            scope.onDispose(() => {
                 if (heartbeat !== undefined) clearInterval(heartbeat);
-                void unsubscribe();
-            };
+                out.close();
+            });
+            // Shared: several consumers may subscribe to the message stream.
+            return shareStream(out.stream);
         },
-    };
+    });
 }

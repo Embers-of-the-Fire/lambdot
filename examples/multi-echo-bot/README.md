@@ -20,40 +20,51 @@ stdout. `Ctrl+C` stops the kernel.
 The shared feature is [`echo.ts`](./echo.ts) — the whole thing is:
 
 ```ts
-export const echo = definePlugin<ConsoleEvents & EchoEvents, ConsoleOutputs & EchoOutputs>({
+export const echo = definePlugin({
     name: "echo",
-    apply(ctx) {
-        function reply(event: BotEvent<string, string, ConsoleAddress | WsEchoAddress>) {
-            return ctx.send(event.address, `echo: ${event.payload}`);
+    apply(input: {
+        "console/lines": Stream<ConsoleLine>;
+        wsecho: Stream<Message<string, WsEchoAddress>>;
+    }) {
+        function reply(event: Message<string, ConsoleLine["address"] | WsEchoAddress>) {
+            return { address: event.address, content: `echo: ${event.payload}` };
         }
 
-        return [ctx.on("console.line", reply), ctx.on("wsecho.message", reply)];
+        return mergeStreams(
+            mapStream(input["console/lines"], reply),
+            mapStream(input.wsecho, reply),
+        );
     },
 });
 ```
 
-Three properties of the core make this one handler serve both platforms:
+Three properties of the core make this one feature serve both platforms:
 
-1. **The envelope carries its own return address.** `BotEvent.address` is
+1. **The envelope carries its own return address.** `Message.address` is
    opaque to the core and produced/consumed by a platform's input/output
-   pair. `ctx.send(event.address, ...)` routes back through whichever output
-   owns the address's `platform` tag — the feature never inspects it.
-2. **A feature can declare events and outputs from several platforms.**
-   `TNeeds`/`TSends` are full maps, so `ConsoleEvents & EchoEvents` and
-   `ConsoleOutputs & EchoOutputs` give one plugin typed access to both
-   worlds. `ContentFor` distributes over the address union, so `send`
-   type-checks per platform through the same call (here both contracts
-   accept `string`).
-3. **The type fold enforces wiring order.** `use(echo)` is a compile error
-   unless both input halves _and_ both output halves are already registered
-   — see the chain in [`index.ts`](./index.ts).
+   pair. The command the feature emits reuses the incoming address, so the
+   reply routes back through whichever output claims the address's
+   `platform` tag — the feature never inspects it.
+2. **A feature's input is a record of streams from several platforms.**
+   The declared input — `{ "console/lines": …; wsecho: … }` — gives one
+   plugin typed access to both worlds, and `mergeStreams` interleaves the
+   two mapped streams into one command stream. The mapper type-checks per
+   platform through the same function (both payloads are `string`).
+3. **Reply routing happens at the wiring.** Each output's `mapping` filters
+   the merged command stream down to its own platform with a type-guard
+   `filterStream` — `cmd.address.platform === "console"` for the printer,
+   `=== "wsecho"` for the websocket output — so every command reaches
+   exactly one output, typed with that platform's address. Composing
+   `.use(echo)` before both message streams exist is a compile error,
+   because identity wiring can no longer satisfy the declared input — see
+   the chain in [`index.ts`](./index.ts).
 
 ## File layout
 
 | File           | Role                                                               |
 | -------------- | ------------------------------------------------------------------ |
 | `echo.ts`      | The shared feature plugin — the only file that is "the bot".       |
-| `echo-spec.ts` | The websocket platform's specific half: platform tag, kind, codec. |
+| `echo-spec.ts` | The websocket platform's specific half: platform tag, frame codec. |
 | `server.ts`    | Demo broadcast server standing in for a real chat service.         |
 | `index.ts`     | Composition root: one kernel, both platforms, self-check + REPL.   |
 
@@ -65,19 +76,21 @@ transport and the `wsInput`/`wsOutput` factories come from
 ## Extending to a real third platform (e.g. Discord)
 
 A Discord-over-websocket platform would slot in without touching `echo.ts`
-beyond widening two type unions and adding one `ctx.on` line:
+beyond widening the input record and adding one `mapStream` line:
 
 1. Write a `discord-spec.ts` like `echo-spec.ts`: platform tag
-   `"discord"`, event kind `"discord.message"`, and a `decode` that
-   normalizes Discord's frame into `{ payload: string, address }` (the
-   address carrying whatever the reply needs — channel id, reply reference).
-2. Declare `const discord = wsPlatform("ws-discord", discordSpec)` and
-   register `.use(discord.transport, config).use(discord.input).use(discord.output)`
-   before `.use(echo)`. The capability name is what keeps it independent of
-   the existing `"ws"` transport: both connections live side by side in one
-   kernel, and each platform's plugins activate with their own.
-3. Widen the feature's declared maps and the `reply` address union.
+   `"discord"` and a `decode` that normalizes Discord's frame into
+   `{ payload: string, address }` (the address carrying whatever the reply
+   needs — channel id, reply reference).
+2. Declare `const discord = wsPlatform("discord", discordSpec)` and wire
+   `.bind(discord.transport, { option: … }).use(discord.input, { mapping: … })`
+   before `.use(echo)`, plus `.bind(discord.output, …)` after it with its
+   own `filterStream(ctx.echo, … === "discord")` mapping. The platform name
+   is what keeps it independent of the existing `"wsecho"` instance: both
+   connections live side by side in one kernel, each platform's plugins
+   wired to their own transport.
+3. Widen the feature's declared input record and the `reply` address union.
 
 If a platform's payload can't be normalized to `string` in `decode`, branch
-on `event.kind` inside the feature, or keep per-platform thin reply plugins
-around a shared pure function (`formatEcho(payload)`).
+on the payload shape inside the feature, or keep per-platform thin reply
+plugins around a shared pure function (`formatEcho(payload)`).

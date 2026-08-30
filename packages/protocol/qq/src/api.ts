@@ -1,15 +1,16 @@
-import type { Disposer, FeaturePlugin } from "@lambdot/core";
+import type { Plugin } from "@lambdot/core";
+import { definePlugin } from "@lambdot/core";
 
-import { readQqCredentials, type QqCredentialKeys, type QqEnvNeeds } from "./credentials.ts";
+import { readQqCredentials, type QqCredentialKeys } from "./credentials.ts";
 import type { QqAddress } from "./events.ts";
 
 /**
- * The REST half of the qq protocol, provided as a typed capability. Both
- * receiving transports (gateway, webhook) deliver events only; sending a
- * message is always an HTTPS call against the open platform. Owns the
- * access-token lifecycle: tokens are cached and refreshed ahead of expiry
- * (the platform hands out ~7200s tokens and keeps the old one valid for a
- * 60s overlap).
+ * The REST half of the qq protocol, emitted as the plugin's namespace value.
+ * Both receiving transports (gateway, webhook) deliver messages only;
+ * sending a message is always an HTTPS call against the open platform. Owns
+ * the access-token lifecycle: tokens are cached and refreshed ahead of
+ * expiry (the platform hands out ~7200s tokens and keeps the old one valid
+ * for a 60s overlap).
  */
 export interface QqApi {
     readonly appId: string;
@@ -26,8 +27,6 @@ export interface QqApi {
     sendMessage(to: QqAddress, content: string): Promise<void>;
 }
 
-export type QqCapability<TCap extends string> = { readonly [K in TCap]: QqApi };
-
 export interface QqApiConfig {
     /** Open-platform base URL; override to point at a mock in tests. */
     readonly apiBase?: string;
@@ -40,33 +39,22 @@ const DEFAULT_API_BASE = "https://api.bot.qq.com";
 const EXPIRY_MARGIN_MS = 60_000;
 
 /**
- * Provide the qq REST client as a typed capability, reading credentials from
- * the env capability (see `@lambdot/env`). Register the env provider first:
+ * The qq REST client as a plugin, reading credentials from an env snapshot
+ * (see `@lambdot/env`). Wire the env namespace through the mapping:
  *
  * ```ts
  * createKernel()
  *     .use(envVars("qq-env", ["QQ_BOT_APP_ID", "QQ_BOT_APP_SECRET"]))
- *     .use(qqApi("qq-api", "qq-env"));
- * // ctx["qq-api"]: QqApi
+ *     .bind(qqApi("qq/api"), { mapping: (ctx) => ({ env: ctx["qq-env"] }) });
  * ```
  */
-export function qqApi<TCap extends string, TEnvCap extends string>(
-    capability: TCap,
-    env: TEnvCap,
-): FeaturePlugin<
-    {},
-    {},
-    undefined,
-    QqApiConfig,
-    `qq-api:${TCap}`,
-    QqCapability<TCap>,
-    QqEnvNeeds<TEnvCap>
-> {
-    return {
-        name: `qq-api:${capability}`,
-        inject: [env],
-        apply(ctx, config) {
-            const credentials = readQqCredentials(ctx[env], config.keys);
+export function qqApi<const TName extends string>(
+    name: TName,
+): Plugin<{ env: Readonly<Record<string, string>> }, QqApi, QqApiConfig, TName> {
+    return definePlugin({
+        name,
+        apply(input, _scope, config) {
+            const credentials = readQqCredentials(input.env, config.keys);
             const apiBase = config.apiBase ?? DEFAULT_API_BASE;
 
             let cached: { token: string; expiresAt: number } | undefined;
@@ -128,7 +116,7 @@ export function qqApi<TCap extends string, TEnvCap extends string>(
             // Passive replies to one msg_id must increment msg_seq.
             const msgSeqs = new Map<string, number>();
 
-            const api: QqApi = {
+            return {
                 appId: credentials.appId,
                 accessToken,
                 async gatewayUrl() {
@@ -153,13 +141,6 @@ export function qqApi<TCap extends string, TEnvCap extends string>(
                     await authed(path, { method: "POST", body: JSON.stringify(body) });
                 },
             };
-
-            // See `wsTransport` in @lambdot/websocket for why `provide` is pinned here.
-            return (ctx.provide as (name: TCap, value: QqApi) => Disposer).call(
-                ctx,
-                capability,
-                api,
-            );
         },
-    };
+    });
 }

@@ -1,10 +1,11 @@
-import { createKernel, definePlugin } from "@lambdot/core";
+import type { Message, StateBackend, Stream } from "@lambdot/core";
+import { createKernel, createStateAccessor, definePlugin, mapStream } from "@lambdot/core";
 import type { DurableObjectNamespace, DurableObjectStorage, WsHub } from "@lambdot/host-cloudflare";
 import { doState, durableObjectNamespace, wsHub } from "@lambdot/host-cloudflare";
 import { wsPlatform } from "@lambdot/websocket";
 import { DurableObject } from "cloudflare:workers";
 
-import type { ChatEvents, ChatOutputs } from "./chat-spec.ts";
+import type { DoChatAddress } from "./chat-spec.ts";
 import { chatSpec } from "./chat-spec.ts";
 
 /** The worker's named bindings, as declared in the miniflare/wrangler config. */
@@ -36,46 +37,53 @@ interface ChatSchema {
     count: number;
 }
 
+/** One inbound room chat message. */
+export type DoChatMessage = Message<string, DoChatAddress>;
+
 /**
- * The room's chat feature. Owns the `dochat.message` event kind: each frame
- * increments a counter in the Durable Object instance's own storage (served
- * through `doState`) and the reply goes out through the room's output —
- * which broadcasts to every socket the hub has accepted.
+ * The room's chat feature: each frame increments a counter in the Durable
+ * Object instance's own storage (served through `doState`) and the reply
+ * goes out through the room's output — which broadcasts to every socket the
+ * hub has accepted. Identity wiring: both inputs ("dochat" message stream,
+ * "state" backend) are namespaces in the same composition.
  */
-const reply = definePlugin<ChatEvents, ChatOutputs, ChatSchema, void, "reply">({
+const reply = definePlugin({
     name: "reply",
-    inject: ["state"],
-    apply(ctx) {
-        return ctx.on("dochat.message", async (event) => {
-            const state = ctx.state.for("reply");
+    apply(input: { dochat: Stream<DoChatMessage>; state: StateBackend }) {
+        const state = createStateAccessor<ChatSchema>(input.state, "reply");
+        return mapStream(input.dochat, async (event) => {
             const count = ((await state.get("count")) ?? 0) + 1;
             await state.set("count", count);
-            await ctx.send(event.address, `echo (#${count}): ${event.payload}`);
+            return { address: event.address, content: `echo (#${count}): ${event.payload}` };
         });
     },
 });
 
 function createRoomKernel(room: WsHub<"room">, url: string, storage: DurableObjectStorage) {
-    // One platform bundle per kernel: `wsOutput` keeps its connection in the
-    // bundle's closure, so a module-level bundle shared across Durable Object
-    // instances (same isolate!) would cross-wire their sockets.
-    const chat = wsPlatform("room", chatSpec);
-    return createKernel()
-        .use(room.plugin, { url }) // provides the hub as the "room" capability
-        .use(chat.input)
-        .use(chat.output)
-        .use(doState(), { storage }) // serves ctx.state from the instance's storage
-        .use(reply);
+    const chat = wsPlatform("dochat", chatSpec);
+    return (
+        createKernel()
+            // the hub rides the composition as an internal namespace
+            .bind(room.plugin, { option: { url } })
+            .use(chat.input, { mapping: (ctx) => ({ connection: ctx.room }) })
+            // serves the "state" namespace from the instance's storage
+            .bind(doState(), { option: { storage } })
+            // identity wiring: { dochat, state } are both visible to reply
+            .use(reply)
+            .bind(chat.output, {
+                mapping: (ctx) => ({ connection: ctx.room, commands: ctx.reply }),
+            })
+    );
 }
 
 /**
  * The Durable Object: one instance per room name, holding the accepted
- * sockets (through the hub) and the kernel that drives them. The kernel is
- * booted once per instance — `start` is idempotent — mirroring the
- * per-isolate kernel in `../cloudflare-bot`. Extends the `DurableObject`
- * base class from the built-in `cloudflare:workers` module (the documented
- * shape; its `ctx`/`env` are typed via the local declaration in
- * `cloudflare-workers.d.ts`).
+ * sockets (through the hub) and the composition that drives them. The
+ * composition is booted once per instance — `start` is idempotent —
+ * mirroring the per-isolate bot in `../cloudflare-bot`. Extends the
+ * `DurableObject` base class from the built-in `cloudflare:workers` module
+ * (the documented shape; its `ctx`/`env` are typed via the local declaration
+ * in `cloudflare-workers.d.ts`).
  */
 export class ChatRoom extends DurableObject<Env> {
     private readonly roomHub = wsHub("room");
@@ -96,15 +104,15 @@ export class ChatRoom extends DurableObject<Env> {
 }
 
 /**
- * The worker-side router kernel: the room namespace binding as a typed
- * capability, read back through the fold as `router.ctx.rooms`.
+ * The worker-side router composition: the room namespace binding as a typed
+ * namespace value, read back as `router.ctx.rooms`.
  */
 function createRouter(env: Env) {
-    return createKernel().use(durableObjectNamespace("rooms"), { binding: env.ROOM });
+    return createKernel().use(durableObjectNamespace("rooms"), { option: { binding: env.ROOM } });
 }
 
-// Workers hand bindings out per request; boot the router kernel once per
-// isolate and reuse it after that (`start` is idempotent).
+// Workers hand bindings out per request; boot the router composition once
+// per isolate and reuse it after that (`start` is idempotent).
 let router: ReturnType<typeof createRouter> | undefined;
 
 export default {

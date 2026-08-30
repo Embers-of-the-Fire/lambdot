@@ -1,31 +1,29 @@
-import type { OutputPlugin } from "@lambdot/core";
+import type { Plugin } from "@lambdot/core";
+import { definePlugin, pumpStream } from "@lambdot/core";
 
-import type { QqApi, QqCapability } from "./api.ts";
-import type { QqAddress } from "./events.ts";
+import type { QqApi } from "./api.ts";
+import type { QqCommandStream } from "./events.ts";
 
 /**
- * The output half of the qq platform: plain text (msg_type 0) through the
- * REST client provided by `qqApi`. Sending is transport-independent — the
- * gateway and webhook infras share this output.
+ * The output half of the qq platform: consumes a command stream and sends
+ * each command as plain text (msg_type 0) through the REST client. Sending
+ * is transport-independent — the gateway and webhook infras share this
+ * output. Terminal: wire it last, after the features it consumes.
  */
-export function qqOutput<TApiCap extends string>(
-    api: TApiCap,
-): OutputPlugin<"qq", QqAddress, string, void, "qq-output", {}, QqCapability<TApiCap>> {
-    let client: QqApi | undefined;
-    return {
-        role: "output",
-        name: "qq-output",
-        platform: "qq",
-        inject: [api],
-        async send(to, content) {
-            if (!client) throw new Error('output "qq" is not active');
-            await client.sendMessage(to, content);
+export function qqOutput<const TName extends string>(
+    name: TName,
+): Plugin<{ api: QqApi; commands: QqCommandStream }, void, void, TName> {
+    return definePlugin({
+        name,
+        apply(input, scope) {
+            const { api } = input;
+            scope.onDispose(
+                pumpStream(
+                    input.commands,
+                    (cmd) => api.sendMessage(cmd.address, cmd.content),
+                    (error) => scope.onError(error),
+                ),
+            );
         },
-        apply(ctx) {
-            client = ctx[api];
-            return () => {
-                client = undefined;
-            };
-        },
-    };
+    });
 }

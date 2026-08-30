@@ -1,127 +1,134 @@
 # @lambdot/core
 
-The lambdot kernel: a stateless, serverless, non-context-aware event pipeline
-for chatbots. It owns no conversational data and no platform semantics —
-inputs, outputs, state backends, and features are all plugins, composed
-through TypeScript's type system. Every `kernel.use(...)` folds the plugin's
-contribution (event kinds, output contracts, typed capabilities, state
-schemas) into the kernel's type parameters, so the context your plugins see
-is computed from what you registered, and registering a plugin before its
+The lambdot kernel: a stateless, serverless, non-context-aware composition
+runtime for chatbots. It owns no conversational data and no platform
+semantics — inputs, outputs, state backends, and features are all plugins,
+composed through TypeScript's type system. A plugin is a function:
+`apply(input, scope, config)` maps a declared input record to an output
+value. Every `use(...)`/`bind(...)` wires the next plugin's input with a
+`mapping` from the namespaces visible so far, so wiring a plugin before its
 dependencies is a compile error. Published on npm as `@lambdot/core`.
 
 ## Concepts
 
-- **Plugins are effects.** `apply(ctx, config)` returns an `Effect` — a
-  disposer, an iterable of disposers, or a promise of either. The plugin's
-  fiber collects them and runs them on unload; there are no lifecycle hooks.
-  Config is validated through any Standard Schema validator (`Config`), with
-  failures surfacing as `ConfigValidationError`.
-- **Plugins have three roles.** Input plugins produce events (only they get
-  `ctx.ingest`), output plugins own a platform and its `send`, and feature
-  plugins (`definePlugin`) are everything else — handlers, middleware, state,
-  capability providers.
-- **`inject`, not boot order.** A plugin listing `inject: ["state"]` stays
-  `pending` until the capability is provided and unloads back to `pending`
-  if it is withdrawn — activation order is derived from `inject`, never from
-  boot sequencing. Typed capabilities (`TProvides`/`TInjects`) additionally
-  make registration order a compile-time gate and type the injected value on
-  the plugin's context; the runtime `inject` array is then restricted to
-  exactly the declared names, so the two gates cannot drift apart.
-- **The event bus is the only message-flow primitive.** `emit` is
-  fire-and-forget, `parallel` awaits all listeners, `serial` awaits in order
-  until one bails with a non-undefined value, and `waterfall` is
-  around-middleware — each listener must call `next()` to delegate, and
-  returning without it short-circuits the chain. Every ingested event passes
-  through the reserved `INGRESS` (`"bot/ingress"`) waterfall first, so
-  authentication, logging, and filtering are ordinary listeners.
-- **Events are processed sequentially, in ingestion order.** One failing
-  event rejects its own `ingest` caller but never jams the queue, so
-  read-modify-write against plugin state inside a handler is race-free.
-- **Outputs are fully typed contracts.** The core envelope (`BotEvent`) is
-  deliberately free of platform semantics — no reply references, no channel
-  vocabulary; `address` is opaque to the core and meaningful only to the
-  output whose platform produced it. `ctx.send(address, content)` compiles
-  only when the content matches the contract of the platform that owns the
-  address, and is uncallable with no outputs registered.
-- **State is a plugin.** The core is stateless; a state plugin is an
-  ordinary feature plugin providing a `StateBackend` as the runtime-gated
-  `"state"` capability (at most one active). A feature declares its schema
-  as `TStateSchema` and gets a typed accessor namespaced to its plugin name
-  via `ctx.state.for(name)`. With no schema declared anywhere, `ctx.state`
-  folds to `NoStateDeclared` and does not typecheck.
+- **A plugin is a function.** `apply(input, scope, config)` receives exactly
+  the input record it declares and returns the output value it emits. There
+  are no plugin roles and no lifecycle hooks: `scope.onDispose(d)` collects
+  teardown (run in reverse on `stop()`), `scope.onError(e)` sinks background
+  errors. Config is validated through any Standard Schema validator
+  (`Config`), with failures surfacing as `ConfigValidationError`.
+- **Composition is function application.** `use(plugin, { mapping, option,
+as })` feeds a plugin from the namespaces visible so far and exposes its
+  output on the final `ctx` under its name. `bind(...)` feeds it the same
+  way but keeps the output internal to the chain — visible to later
+  `mapping`s, absent from `ctx`. `mapping` is omitted when the plugin's
+  input keys already match visible namespaces (identity wiring); `option`
+  carries config, required exactly when the config type is non-void; `as`
+  renames the namespace.
+- **Streams are the message-flow primitive.** `Stream<T>` is an
+  `AsyncIterable` with broadcast semantics — every consumer sees every item,
+  in order, at its own pace. Inputs push from callbacks through `channel()`
+  and emit a `shareStream` view; features transform with
+  `mapStream`/`filterStream`/`mergeStreams`; outputs consume command streams
+  with `pumpStream`. A feature handling two platforms merges their streams;
+  a command stream serving two platforms is filtered per output by
+  `address.platform` in the wiring `mapping`.
+- **The envelope is free of platform semantics.** `Message` is `payload` +
+  `address` (+ `id`/`at`, minted by `message()`); `Command` is `address` +
+  `content`. `address` is opaque to the core and meaningful only to the
+  platform that produced it.
+- **Platform-specific services are ordinary namespace values.** A REST
+  client, a webhook handler, a database connection — anything a plugin emits
+  lands on `ctx` (or stays internal via `bind`) with its type intact.
+- **State is a plugin.** The core is stateless; a state plugin emits a
+  `StateBackend` as its namespace value, and a stateful feature declares the
+  backend in its input and builds a typed accessor namespaced to its own
+  name via `createStateAccessor(backend, name)`.
+- **Activation order is definition order.** `start()` activates in
+  composition order — resolve mapping, validate config, `apply` — and
+  `stop()` disposes in reverse. Ordering mistakes are compile errors in the
+  mappings, not runtime states.
 
 ## Usage
 
 ```ts
-import { consolePlatform, type ConsoleEvents, type ConsoleOutputs } from "@lambdot/console";
-import { createKernel, definePlugin } from "@lambdot/core";
+import { consolePlatform, type ConsoleLine } from "@lambdot/console";
+import type { Stream } from "@lambdot/core";
+import { createKernel, definePlugin, mapStream } from "@lambdot/core";
 
-const echo = definePlugin<ConsoleEvents, ConsoleOutputs>({
+const echo = definePlugin({
     name: "echo",
-    apply(ctx) {
-        return ctx.on("console.line", (event) => ctx.send(event.address, `echo: ${event.payload}`));
+    apply(input: { "console/lines": Stream<ConsoleLine> }) {
+        return mapStream(input["console/lines"], (event) => ({
+            address: event.address,
+            content: `echo: ${event.payload}`,
+        }));
     },
 });
 
 const cli = consolePlatform();
 
-const kernel = createKernel().use(cli.input).use(cli.output).use(echo);
+const kernel = createKernel()
+    .use(cli.lines) // exposes ctx["console/lines"]: Stream<ConsoleLine>
+    .use(echo) // identity wiring: the input keys already match
+    .bind(cli.printer, { mapping: (ctx) => ({ replies: ctx.echo }) });
 
 await kernel.start();
 process.on("SIGINT", () => void kernel.stop().then(() => process.exit(0)));
 ```
 
-`use(cli.input)` folds `ConsoleEvents` into the kernel, `use(cli.output)`
-folds the console output contract, and only then does `use(echo)` typecheck
-— `echo` declares it handles `console.line` and sends through the console
-platform, and the fold must already satisfy both. `start()` activates every
-plugin whose `inject` requirements are met (warning about ones left
-pending); `stop()` disposes every active fiber in reverse registration
-order.
+`use(cli.lines)` exposes the line stream under `"console/lines"`. `use(echo)`
+needs no `mapping`: its declared input `{ "console/lines": ... }` is already
+satisfied by the visible ctx. The printer declares `{ replies: ... }`, which
+no namespace provides — so the `mapping` is required, and its `ctx`
+parameter is typed as exactly what's visible so far; referencing a
+not-yet-composed namespace is a compile error. The printer is `bind`ed, so
+`ctx["console/printer"]` does not typecheck.
 
 ## API overview
 
 Runtime values:
 
-| Export                   | What it is                                                                 |
-| ------------------------ | -------------------------------------------------------------------------- |
-| `createKernel(options?)` | Creates an empty `Kernel`; `options.onError` sinks fire-and-forget errors. |
-| `Kernel`                 | `ctx` (the typed fold), `use(plugin, config?)`, `start()`, `stop()`.       |
-| `definePlugin(...)`      | Identity helper for authoring feature plugins with precise generics.       |
-| `INGRESS`                | The reserved `"bot/ingress"` waterfall kind every ingested event crosses.  |
-| `ConfigValidationError`  | Thrown when a plugin's `Config` schema rejects its config.                 |
+| Export                               | What it is                                                               |
+| ------------------------------------ | ------------------------------------------------------------------------ |
+| `createKernel(options?)`             | Creates an empty composition; `options.onError` sinks background errors. |
+| `definePlugin(spec)`                 | Authors a plugin from `{ name, Config?, apply }`.                        |
+| `message(payload, address)`          | Mints a `Message` envelope with a fresh `id`/`at`.                       |
+| `channel()`                          | Push-side bridge from callbacks into the pull world.                     |
+| `shareStream(stream)`                | Multicasts a stream to any number of consumers.                          |
+| `mapStream`                          | Per-item transform (async mapper allowed; items stay sequential).        |
+| `filterStream`                       | Per-item filter; the type-guard form narrows the item type.              |
+| `mergeStreams`                       | Interleaves several streams in arrival order.                            |
+| `pumpStream`                         | Background sequential consumer; errors go to `onError`.                  |
+| `createStateAccessor(backend, name)` | Typed, namespaced view over a `StateBackend`.                            |
+| `ConfigValidationError`              | Thrown when a plugin's `Config` schema rejects its config.               |
 
 Types, grouped by theme:
 
-- **Events** — `BotEvent` (the envelope: `kind`, `payload`, `address`, `id`,
-  `at`), `AnyBotEvent`, `EventDef`, `EventMap`, `Listener`, `NextFn`,
-  `IngressListener`, `OnOptions` (`prepend` to run before ordinary
-  registrations).
-- **Contexts and contracts** — `ContextView` (the typed surface every plugin
-  sees: `on`/`emit`/`parallel`/`serial`/`waterfall`, `send`, `state`,
-  `provide`), `InputContext` (adds `ingest`), `Address`,
-  `OutputContract`/`OutputContractMap`, `ContentFor`.
-- **Plugins** — `PluginMeta` (shared `name`/`inject`/`provide`/`Config`),
-  `InputPlugin`, `OutputPlugin`, `FeaturePlugin`, `AnyPlugin`.
-- **The type-level fold** — `EventsOf`, `OutputsOf`, `StateOf`, `CapsOf`,
-  `InjectsOf`, `ConfigOf`, `Spread`, `Validate` (the `use()` gate:
-  `"unregistered event kinds"`, `"unregistered output platforms"`,
-  `"unprovided capabilities"`, `"mismatched capability types"`).
-- **Effects and fibers** — `Effect`, `EffectResult`, `Disposer`,
-  `FiberState` (`"pending" | "activating" | "active" | "disposed"`).
+- **Messages** — `Message` (the inbound envelope: `payload`, `address`,
+  `id`, `at`), `Command` (the outbound pair: `address`, `content`),
+  `Address` (the `platform` routing tag).
+- **Streams** — `Stream`, `Channel`.
+- **Plugins** — `Plugin` (name, `Config`, `apply`, plus the composition
+  methods), `PluginSpec` (the author-facing half), `Scope` (`onDispose` /
+  `onError`), `Composite` (a composed chain — itself wireable), `AnyUnit`.
+- **The composition types** — `InOf`, `OutOf`, `ConfigOf`, `NameOf`,
+  `WireArgs` (the `use`/`bind` options: `mapping` required when identity
+  wiring fails, `option` required when config is non-void, `as` to rename),
+  `StartArgs`, `Kernel` (a `Composite` seeded empty).
 - **Config** — `StandardSchemaV1` (structural copy of the Standard Schema v1
   interface; zod, valibot, arktype, … plug in with no runtime dependency).
 - **State** — `StateBackend` (`get`/`set`/`delete` over namespace + key,
-  optional `ttlMs`), `StateAccessor` (the typed, namespaced view),
-  `StateView`.
+  optional `ttlMs`), `StateAccessor`.
+- **Lifecycle** — `Disposer`.
 - **Kernel options** — `KernelOptions`.
 
 ## Examples
 
 The worked walkthroughs live in the repository's `examples/` directory:
-`echo-bot` (the minimal bot above, plus compile-time fold tests in
+`echo-bot` (the minimal bot above, plus compile-time composition tests in
 `type-test.ts`), `counter-bot` (the pluggable-state walkthrough), and
-`websocket-bot` (the typed-capability walkthrough).
+`websocket-bot` (the transport-wiring walkthrough).
 
 ## License
 
