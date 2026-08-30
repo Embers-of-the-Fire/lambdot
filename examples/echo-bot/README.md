@@ -76,23 +76,27 @@ becomes the namespace key the output is exposed under once composed.
 ## type-test.ts
 
 `type-test.ts` is a compile-time check on the composition types: it
-composes a probe plugin built by a factory whose key list becomes the
-namespace record's keys, and asserts that `kernel.ctx.probe` reads back as
-`Readonly<Record<"A" | "B", string>>`. It keeps the `const TKey extends
-string` modifier on such factories honest — without it, inline key lists
-widen to `string` and the namespace record loses its literal keys. The file
-is in this package's `tsconfig.json`, so it runs with the per-project
-typecheck (`npx tsc -p examples/echo-bot`), and the root `nub run lint` is
-type-aware as well. The heavier wiring assertions (typed namespaces,
-`bind` hiding, required mappings, ordering) live in
-[`websocket-bot/type-test.ts`](../websocket-bot/type-test.ts).
+composes the console platform with the echo plugin exactly like
+`index.ts` does, then asserts how the namespaces are wired — the exposed
+namespaces read back with their declared stream types on `kernel.ctx`,
+a `bind`ed plugin is hidden from the final ctx, identity wiring only
+compiles when the declared input is already visible (otherwise the
+`mapping` becomes a required argument), mappings are checked against
+the namespaces visible at that point in the chain with compatible
+types, and duplicate namespaces are rejected. The file is in this
+package's `tsconfig.json`, so it runs with the per-project typecheck
+(`npx tsc -p examples/echo-bot`), and the root `nub run lint` is
+type-aware as well.
+[`websocket-bot/type-test.ts`](../websocket-bot/type-test.ts) mirrors
+these assertions through the generic `@lambdot/websocket` factories,
+plus required options and two platforms side by side.
 
 ## File layout
 
-| File           | Role                                                        |
-| -------------- | ----------------------------------------------------------- |
-| `index.ts`     | The bot: one echo feature on the console platform.          |
-| `type-test.ts` | Compile-time check on namespace records built by factories. |
+| File           | Role                                                      |
+| -------------- | --------------------------------------------------------- |
+| `index.ts`     | The bot: one echo feature on the console platform.        |
+| `type-test.ts` | Compile-time assertions on namespace wiring in the chain. |
 
 ## See also
 
