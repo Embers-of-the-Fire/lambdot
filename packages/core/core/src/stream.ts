@@ -70,15 +70,23 @@ export function channel<T>(): Channel<T> {
  * pace. Pulling starts when the first consumer attaches, pauses when the
  * last one detaches (the source buffers), and resumes on the next attach.
  * Consumers attaching mid-stream see items from that point on —
- * subscription semantics, like an event bus listener.
+ * subscription semantics, like an event bus listener. A source error ends
+ * the stream: waiting and future reads reject with it (after draining
+ * what was already buffered), so consumers like `pumpStream` can forward
+ * it instead of hanging.
  */
 export function shareStream<T>(stream: Stream<T>): Stream<T> {
     interface Consumer {
         buffer: T[];
-        waiting: ((result: IteratorResult<T>) => void) | null;
+        waiting: {
+            resolve: (result: IteratorResult<T>) => void;
+            reject: (error: unknown) => void;
+        } | null;
     }
     const consumers = new Set<Consumer>();
     let closed = false;
+    let failed = false;
+    let failure: unknown;
     let pulling = false;
     let iterator: AsyncIterator<T> | undefined;
     let held: { value: T } | undefined;
@@ -86,7 +94,7 @@ export function shareStream<T>(stream: Stream<T>): Stream<T> {
     const push = (item: T): void => {
         for (const consumer of consumers) {
             if (consumer.waiting) {
-                const resolve = consumer.waiting;
+                const { resolve } = consumer.waiting;
                 consumer.waiting = null;
                 resolve({ value: item, done: false });
             } else {
@@ -99,43 +107,61 @@ export function shareStream<T>(stream: Stream<T>): Stream<T> {
         if (pulling || closed) return;
         pulling = true;
         void (async () => {
-            // One iterator for the stream's lifetime: pausing via `break`
-            // out of `for await` would finish generator-backed sources
-            // permanently, so they could never resume.
-            iterator ??= stream[Symbol.asyncIterator]();
-            const source = iterator;
-            // Deliver an item pulled while the last consumer detached.
-            if (held) {
-                push(held.value);
-                held = undefined;
-            }
-            let sourceDone = false;
-            // Check before pulling: with nobody listening, pause (the
-            // source buffers) without consuming an item; the next attach
-            // resumes this same iterator.
-            while (consumers.size > 0) {
-                const result = await source.next();
-                if (result.done) {
-                    sourceDone = true;
-                    break;
+            try {
+                // One iterator for the stream's lifetime: pausing via `break`
+                // out of `for await` would finish generator-backed sources
+                // permanently, so they could never resume.
+                iterator ??= stream[Symbol.asyncIterator]();
+                const source = iterator;
+                // Deliver an item pulled while the last consumer detached.
+                if (held) {
+                    push(held.value);
+                    held = undefined;
                 }
-                // The last consumer detached while this pull was in
-                // flight: hold the item instead of dropping it.
-                if (consumers.size === 0) {
-                    held = { value: result.value };
-                    break;
+                let sourceDone = false;
+                // Check before pulling: with nobody listening, pause (the
+                // source buffers) without consuming an item; the next attach
+                // resumes this same iterator.
+                while (consumers.size > 0) {
+                    const result = await source.next();
+                    if (result.done) {
+                        sourceDone = true;
+                        break;
+                    }
+                    // The last consumer detached while this pull was in
+                    // flight: hold the item instead of dropping it.
+                    if (consumers.size === 0) {
+                        held = { value: result.value };
+                        break;
+                    }
+                    push(result.value);
                 }
-                push(result.value);
-            }
-            pulling = false;
-            if (!sourceDone) return;
-            closed = true;
-            for (const consumer of consumers) {
-                if (consumer.waiting) {
-                    const resolve = consumer.waiting;
-                    consumer.waiting = null;
-                    resolve({ value: undefined, done: true });
+                if (!sourceDone) return;
+                closed = true;
+                for (const consumer of consumers) {
+                    if (consumer.waiting) {
+                        const { resolve } = consumer.waiting;
+                        consumer.waiting = null;
+                        resolve({ value: undefined, done: true });
+                    }
                 }
+            } catch (error) {
+                // A source error ends the stream: settle waiting consumers
+                // with the rejection and fail future next() calls (after
+                // they drain what was already buffered), so consumers like
+                // pumpStream see the error instead of hanging forever.
+                failed = true;
+                failure = error;
+                closed = true;
+                for (const consumer of consumers) {
+                    if (consumer.waiting) {
+                        const { reject } = consumer.waiting;
+                        consumer.waiting = null;
+                        reject(error);
+                    }
+                }
+            } finally {
+                pulling = false;
             }
         })();
     };
@@ -152,15 +178,16 @@ export function shareStream<T>(stream: Stream<T>): Stream<T> {
                             value: consumer.buffer.shift() as T,
                             done: false,
                         });
+                    if (failed) return Promise.reject(failure);
                     if (closed) return Promise.resolve({ value: undefined, done: true });
-                    return new Promise((resolve) => {
-                        consumer.waiting = resolve;
+                    return new Promise((resolve, reject) => {
+                        consumer.waiting = { resolve, reject };
                     });
                 },
                 return(): Promise<IteratorResult<T>> {
                     consumers.delete(consumer);
                     if (consumer.waiting) {
-                        const resolve = consumer.waiting;
+                        const { resolve } = consumer.waiting;
                         consumer.waiting = null;
                         resolve({ value: undefined, done: true });
                     }
