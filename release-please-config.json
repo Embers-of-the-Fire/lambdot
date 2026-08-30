@@ -13,6 +13,9 @@
         "packages/core/env": {
             "component": "env"
         },
+        "packages/core/logging": {
+            "component": "logging"
+        },
         "packages/core/websocket": {
             "component": "websocket"
         },
@@ -41,6 +44,7 @@
                 "console",
                 "core",
                 "env",
+                "logging",
                 "websocket",
                 "host-cloudflare",
                 "protocol-qq",
