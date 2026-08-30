@@ -71,7 +71,9 @@ jobs:
                   fi
                   git fetch origin "$branch"
                   git checkout -B "$branch" "origin/$branch"
-                  nub install
+                  # nub install defaults to --frozen-lockfile when CI is set,
+                  # which is precisely the drift this job exists to repair.
+                  nub install --no-frozen-lockfile
                   if git diff --quiet -- nub.lock; then
                       echo "nub.lock already in sync"
                       exit 0
