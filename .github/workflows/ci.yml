@@ -21,10 +21,9 @@ jobs:
 
             # Installs pnpm (pinned via packageManager/devEngines.packageManager)
             # and the pinned Node runtime (devEngines.runtime), then runs
-            # pnpm install --frozen-lockfile (require-lockfile).
+            # pnpm install (frozen lockfile is pnpm's default under CI).
             - uses: pnpm/setup@v2
               with:
-                  require-lockfile: true
                   cache: true
 
             - name: Check formatting
