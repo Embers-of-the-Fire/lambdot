@@ -150,10 +150,10 @@ Webhook infra:
 
 ## Examples
 
-- [qq-gateway-bot](../../examples/qq-gateway-bot) — the full gateway round
+- [qq-gateway-bot](../../../examples/qq-gateway-bot) — the full gateway round
   trip against a fake platform: token endpoint, gateway discovery, and a
   websocket speaking the op-code flow.
-- [qq-webhook-bot](../../examples/qq-webhook-bot) — a hono-served callback
+- [qq-webhook-bot](../../../examples/qq-webhook-bot) — a hono-served callback
   against a fake platform, exercising op-13 validation, a signed dispatch,
   and a rejected forged signature.
 

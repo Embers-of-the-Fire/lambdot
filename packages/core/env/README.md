@@ -54,9 +54,9 @@ that reads from a worker's bindings object into the same record shape.
 
 ## Examples
 
-- [qq-gateway-bot](../../examples/qq-gateway-bot) — `envVars("qq-env", ...)`
+- [qq-gateway-bot](../../../examples/qq-gateway-bot) — `envVars("qq-env", ...)`
   feeds the qq platform's api plugin through its `mapping`.
-- [qq-webhook-bot](../../examples/qq-webhook-bot) — the same env wiring over
+- [qq-webhook-bot](../../../examples/qq-webhook-bot) — the same env wiring over
   webhooks.
 
 ## License

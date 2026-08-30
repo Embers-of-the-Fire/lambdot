@@ -130,10 +130,10 @@ plugins don't change.
 
 ## Examples
 
-- [../../examples/websocket-bot](../../examples/websocket-bot) — one platform
+- [../../../examples/websocket-bot](../../../examples/websocket-bot) — one platform
   end to end: a raw driver round-trips through server, transport, input,
   reply feature, and output.
-- [../../examples/dual-websocket-bot](../../examples/dual-websocket-bot) — two
+- [../../../examples/dual-websocket-bot](../../../examples/dual-websocket-bot) — two
   tagged platforms sharing one kernel under distinct names, each output
   filtering the shared command stream by `address.platform`.
 

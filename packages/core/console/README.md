@@ -74,9 +74,9 @@ the `mapping` parameter is typed as the namespaces visible so far.
 
 ## Examples
 
-- [echo-bot](../../examples/echo-bot) — the echo bot above, plus
+- [echo-bot](../../../examples/echo-bot) — the echo bot above, plus
   compile-time type tests for the composition wiring.
-- [multi-echo-bot](../../examples/multi-echo-bot) — one echo feature
+- [multi-echo-bot](../../../examples/multi-echo-bot) — one echo feature
   serving the console and a websocket platform side by side.
 
 ## License
