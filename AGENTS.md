@@ -52,6 +52,12 @@ Release automation is release-plz-style, built on release-please
   and are bumped in every release PR by release-please's `node-workspace`
   plugin (`merge: false`, paired with `linked-versions`). Private
   `examples/*` keep `workspace:*` so they always link the local packages.
+  Because nub.lock records those pins as specifiers, the `lockfile` job in
+  `release.yml` runs after any release-please run that didn't cut releases
+  (and on `workflow_dispatch`, to repair an already-stale PR): if the release
+  PR branch exists and its nub.lock is stale, it pushes a `nub install` sync
+  commit, refusing any diff beyond `specifier:` bumps. Without it the release
+  PR (and `main` after merging it) fails `nub install --frozen-lockfile`.
 - A new publishable package must be registered in both release-please files:
   `packages` + the `linked-versions` `components` list in the config (same
   component name in both), and the manifest.
