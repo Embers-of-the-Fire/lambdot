@@ -102,11 +102,11 @@ export type OutOf<TUnit> = TUnit extends {
     ? Awaited<TOut>
     : never;
 export type ConfigOf<TUnit> = TUnit extends { Config?: StandardSchemaV1<any, infer TConfig> }
-    ? unknown extends TConfig
+    ? [TConfig] extends [void]
         ? void
         : TConfig
     : TUnit extends { apply(input: any, scope: any, config: infer TConfig): any }
-      ? unknown extends TConfig
+      ? [TConfig] extends [void]
           ? void
           : TConfig
       : void;
