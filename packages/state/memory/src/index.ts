@@ -11,6 +11,10 @@ interface Entry {
  * plugin emitting the backend as its namespace value — stateful features
  * declare it in their input and build a typed accessor with
  * `createStateAccessor(backend, name)`.
+ *
+ * The store is created at activation: each kernel activation starts from an
+ * empty `Map`, writes are not shared between kernels built from the same
+ * plugin value, and state is gone when the composition stops.
  */
 export function memoryState(): Plugin<void, StateBackend, void, "state"> {
     return definePlugin({

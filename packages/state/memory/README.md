@@ -15,9 +15,10 @@ plugins build a typed, namespaced view of it with
 
 Semantics and limitations:
 
-- **Per-process, non-persistent.** The store is a `Map` created inside
-  `memoryState()`; it lives and dies with the process and is shared by
-  every kernel instance built from the same plugin value.
+- **Per-activation, non-persistent.** The store is a `Map` created in
+  `apply()`, so each kernel activation starts from an empty store: two
+  kernels built from the same `memoryState()` value do not see each
+  other's writes, and state is gone when the composition stops.
 - **Lazy TTL.** `set(namespace, key, value, ttlMs)` records an absolute
   expiry; an expired key is evicted on read (`get` deletes it and returns
   `undefined`). There is no background sweeper.
