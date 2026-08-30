@@ -208,6 +208,12 @@ importers:
         specifier: 0.1.0
         version: link:../core
 
+  packages/core/logging:
+    dependencies:
+      '@lambdot/core':
+        specifier: 0.1.0
+        version: link:../core
+
   packages/core/websocket:
     dependencies:
       '@lambdot/core':

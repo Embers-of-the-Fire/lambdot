@@ -79,8 +79,9 @@ Release automation is release-plz-style, built on release-please
 Monorepo: `packages/<category>/*` (`@lambdot/*`) and `examples/*`
 (`@lambdot-example/*`). Package categories: `core` (the kernel plus
 platform-agnostic pieces — the `console` reference platform, the
-`websocket` transport factories, and `env` for reading `process.env` into a
-typed namespace), `protocol` (chat-service wire protocols: `qq` serves both
+`websocket` transport factories, `env` for reading `process.env` into a
+typed namespace, and `logging` for the `Logger` ctx hook and its pluggable
+record sinks), `protocol` (chat-service wire protocols: `qq` serves both
 QQ infras — the websocket gateway and the webhook (reversed post) — over one
 REST client; discord, ... none yet), `host` (hosting/runtime integrations:
 cloudflare — a worker's named KV/D1/R2/Durable-Object bindings and plain

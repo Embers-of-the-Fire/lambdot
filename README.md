@@ -98,7 +98,8 @@ in the plugin ecosystem:
   machinery — it owns the socket lifecycle and defers everything
   chat-specific to a `WsSpec` supplied by its consumers, so it is a core
   behavior, not a chat platform; `env` reads variables from `process.env`
-  into a typed namespace.
+  into a typed namespace; `logging` supplies the `Logger` ctx hook and
+  pluggable record sinks.
 - **`protocol/`** — chat-service wire protocols (planned: `discord`, ...).
   A protocol package supplies one chat service's address type, stream
   contracts, and frame codec, riding a core transport such as
@@ -126,6 +127,7 @@ has no category directories. Only core members keep framework-level names.
 | `packages/core/console`       | `@lambdot/console`         | console platform (`consolePlatform` bundle)           |
 | `packages/core/websocket`     | `@lambdot/websocket`       | websocket transport (`wsPlatform` bundle)             |
 | `packages/core/env`           | `@lambdot/env`             | `process.env` variables as a typed namespace          |
+| `packages/core/logging`       | `@lambdot/logging`         | `Logger` ctx hooks + pluggable record sinks           |
 | `packages/protocol/qq`        | `@lambdot/protocol-qq`     | qq protocol: gateway + webhook infras, REST api       |
 | `packages/state/memory`       | `@lambdot/state-memory`    | in-memory `StateBackend` (reference backend)          |
 | `packages/state/sqlite`       | `@lambdot/state-sqlite`    | `node:sqlite` connection as a namespace value         |
