@@ -10,7 +10,7 @@ export interface WsConnection {
     readonly url: string;
     /** Send a text frame. */
     send(data: string): void;
-    /** Subscribe to incoming text frames. Returns an unsubscribe disposer. */
+    /** Subscribe to incoming text frames. The listener remains active for the connection lifetime. */
     onMessage(listener: (data: string) => void): void;
 }
 
