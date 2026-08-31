@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.0
+
+### Minor Changes
+
+- [#12](https://github.com/Embers-of-the-Fire/lambdot/pull/12) [`71e5732`](https://github.com/Embers-of-the-Fire/lambdot/commit/71e57321ad4ec7d1aef3651d104123f8167ec2e7) Thanks [@Embers-of-the-Fire](https://github.com/Embers-of-the-Fire)! - Add `Composite.expose(name)`: seal a kernel chain into a final, named `Engine` artifact. The engine preserves the chain's external input requirement, erases `bind`-encapsulated internals from its type, drops the composition methods (`use`/`bind` throw at runtime once exposed), and wires into a supervisor kernel under its new name.
+
+### Patch Changes
+
+- [#12](https://github.com/Embers-of-the-Fire/lambdot/pull/12) [`71e5732`](https://github.com/Embers-of-the-Fire/lambdot/commit/71e57321ad4ec7d1aef3651d104123f8167ec2e7) Thanks [@Embers-of-the-Fire](https://github.com/Embers-of-the-Fire)! - Implement `Engine.apply` on the runtime behind `Composite.expose`: the sealed engine now delegates to its inner composition, so calling `engine.apply(input, scope, config)` directly works instead of throwing `TypeError: engine.apply is not a function`.
+
 ## 0.1.1
 
 ### Patch Changes
