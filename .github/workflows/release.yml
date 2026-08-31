@@ -7,10 +7,10 @@ name: Release
 #      publishable but not-yet-published packages -> "publish".
 #   2. The version job bumps package manifests, regenerates CHANGELOG.md
 #      files (changelog-github) and refreshes pnpm-lock.yaml in the same
-#      commit (`changeset version` + `pnpm install --lockfile-only
-#      --no-frozen-lockfile` — pnpm defaults to frozen lockfile in CI, so the
-#      override is required). Manifest pins and lockfile therefore cannot
-#      drift.
+#      commit (the "version-packages" root script: `changeset version` +
+#      `pnpm install --lockfile-only --no-frozen-lockfile` — pnpm defaults
+#      to frozen lockfile in CI, so the override is required). Manifest pins
+#      and lockfile therefore cannot drift.
 #   3. Merging the version PR makes select-mode return "publish": the pack
 #      job builds tarballs from the publish plan (no build step — packages
 #      ship raw TypeScript source), and the publish job pushes them to npm.
@@ -74,7 +74,11 @@ jobs:
                   # Bump manifests and changelogs, then refresh the lockfile
                   # in the same commit — pnpm defaults to --frozen-lockfile
                   # in CI, which is precisely what must not apply here.
-                  script: pnpm changeset version && pnpm install --lockfile-only --no-frozen-lockfile
+                  # changesets/action executes this script by space-splitting
+                  # it into command + args without a shell, so `&&` chaining
+                  # cannot work here — the chain lives in the root
+                  # "version-packages" script, which pnpm runs in a shell.
+                  script: pnpm run version-packages
 
     pack:
         name: Pack publishable packages
