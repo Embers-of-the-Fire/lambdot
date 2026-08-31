@@ -1,6 +1,11 @@
 {
     "name": "@lambdot/protocol-qq",
     "version": "0.1.1",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/Embers-of-the-Fire/lambdot",
+        "directory": "packages/protocol/qq"
+    },
     "type": "module",
     "exports": {
         ".": "./src/index.ts"
