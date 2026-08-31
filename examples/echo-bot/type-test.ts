@@ -63,3 +63,43 @@ void createKernel()
     .use(cli.lines)
     // @ts-expect-error "console/lines" is already taken
     .use(cli.lines);
+
+/* ------------------------------------------------------------------ */
+/* expose: sealing a chain into a named engine                        */
+/* ------------------------------------------------------------------ */
+
+// expose seals the chain into a final artifact: the visible ctx survives
+// under the new name, the bound internals are erased from the type
+const bot = createKernel()
+    .use(cli.lines)
+    .use(echo)
+    .bind(cli.printer, { mapping: (ctx) => ({ replies: ctx.echo }) })
+    .expose("bot");
+
+const botName: "bot" = bot.name;
+void botName;
+const botCtx: { "console/lines": Stream<ConsoleLine>; echo: Stream<ConsoleReply> } = bot.ctx;
+void botCtx;
+
+// @ts-expect-error the printer was bound: erased by expose, absent from ctx
+void bot.ctx["console/printer"];
+
+// @ts-expect-error the engine is final: no composition methods
+bot.use(echo);
+
+// an engine is a unit: a supervisor kernel wires it under its exposed name
+const supervisor = createKernel().use(bot);
+const nested: { "console/lines": Stream<ConsoleLine>; echo: Stream<ConsoleReply> } =
+    supervisor.ctx.bot;
+void nested;
+
+// the engine's external input requirement survives exposure: a chain built
+// on echo still needs "console/lines", so identity wiring fails on an empty
+// kernel and succeeds once the dependency is visible
+const halfBot = echo
+    .bind(cli.printer, { mapping: (ctx) => ({ replies: ctx.echo }) })
+    .expose("half");
+
+// @ts-expect-error the exposed engine still declares "console/lines" as input
+void createKernel().use(halfBot);
+void createKernel().use(cli.lines).use(halfBot);

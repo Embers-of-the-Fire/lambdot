@@ -73,12 +73,42 @@ export interface Composite<TIn = void, TVisible = {}, THidden = {}, TName extend
         ...args: WireArgs<TUnit, InputPart<TIn> & TVisible & THidden, TAs>
     ): Composite<TIn, TVisible, THidden & { [K in TAs]: OutOf<TUnit> }, TName>;
 
+    /**
+     * Seal the chain into a final artifact under a new name. The engine's
+     * type is exactly `Engine<TIn, TVisible, TAlias>`: the external input
+     * requirement is preserved, the `bind`-encapsulated internals
+     * (`THidden`) and the chain's own name are erased. Composing onto an
+     * exposed chain throws at runtime.
+     */
+    expose<const TAlias extends string>(name: TAlias): Engine<TIn, TVisible, TAlias>;
+
     start(...args: StartArgs<TIn>): Promise<void>;
     stop(): Promise<void>;
     readonly ctx: TVisible;
 }
 
-export type AnyUnit = Plugin<any, any, any, any> | Composite<any, any, any, any>;
+/**
+ * A sealed composition — what {@link Composite.expose} returns. Structurally
+ * a unit (`name` + `apply`), so it wires into a supervisor kernel like any
+ * plugin, but the composition methods are gone: an engine is final. Its
+ * output is the chain's visible context; its input is the chain's external
+ * requirement. Internal (`bind`ed) namespaces exist only at runtime, never
+ * in the type.
+ */
+export interface Engine<TIn = void, TOut = {}, TName extends string = string> {
+    readonly name: TName;
+    apply(input: TIn, scope: Scope, config: void): Promise<TOut>;
+
+    start(...args: StartArgs<TIn>): Promise<void>;
+    stop(): Promise<void>;
+    /** The exposed namespaces. Populated during `start`; typed regardless. */
+    readonly ctx: TOut;
+}
+
+export type AnyUnit =
+    | Plugin<any, any, any, any>
+    | Composite<any, any, any, any>
+    | Engine<any, any, any>;
 
 /** The kernel is a composition seeded empty: `createKernel().use(...)`. */
 export type Kernel<TVisible = {}, THidden = {}> = Composite<void, TVisible, THidden, "kernel">;

@@ -5,6 +5,7 @@ export type {
     AnyUnit,
     Composite,
     ConfigOf,
+    Engine,
     InOf,
     Kernel,
     NameOf,
