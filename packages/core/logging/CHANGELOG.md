@@ -1,5 +1,12 @@
 # @lambdot/logging
 
+## 0.2.0
+
+### Patch Changes
+
+- Updated dependencies [[`71e5732`](https://github.com/Embers-of-the-Fire/lambdot/commit/71e57321ad4ec7d1aef3651d104123f8167ec2e7), [`71e5732`](https://github.com/Embers-of-the-Fire/lambdot/commit/71e57321ad4ec7d1aef3651d104123f8167ec2e7)]:
+  - @lambdot/core@0.2.0
+
 ## 0.1.1
 
 ### Patch Changes
