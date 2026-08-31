@@ -402,43 +402,43 @@ importers:
   packages/core/console:
     dependencies:
       '@lambdot/core':
-        specifier: 0.1.0
-        version: 0.1.0
+        specifier: workspace:*
+        version: link:../core
 
   packages/core/core: {}
 
   packages/core/env:
     dependencies:
       '@lambdot/core':
-        specifier: 0.1.0
-        version: 0.1.0
+        specifier: workspace:*
+        version: link:../core
 
   packages/core/logging:
     dependencies:
       '@lambdot/core':
-        specifier: 0.1.0
-        version: 0.1.0
+        specifier: workspace:*
+        version: link:../core
 
   packages/core/websocket:
     dependencies:
       '@lambdot/core':
-        specifier: 0.1.0
-        version: 0.1.0
+        specifier: workspace:*
+        version: link:../core
 
   packages/host/cloudflare:
     dependencies:
       '@lambdot/core':
-        specifier: 0.1.0
-        version: 0.1.0
+        specifier: workspace:*
+        version: link:../../core/core
 
   packages/protocol/qq:
     dependencies:
       '@lambdot/core':
-        specifier: 0.1.0
-        version: 0.1.0
+        specifier: workspace:*
+        version: link:../../core/core
       '@lambdot/websocket':
-        specifier: 0.1.0
-        version: 0.1.0
+        specifier: workspace:*
+        version: link:../../core/websocket
       tweetnacl:
         specifier: ^1.0.3
         version: 1.0.3
@@ -446,14 +446,14 @@ importers:
   packages/state/memory:
     dependencies:
       '@lambdot/core':
-        specifier: 0.1.0
-        version: 0.1.0
+        specifier: workspace:*
+        version: link:../../core/core
 
   packages/state/sqlite:
     dependencies:
       '@lambdot/core':
-        specifier: 0.1.0
-        version: 0.1.0
+        specifier: workspace:*
+        version: link:../../core/core
 
 packages:
 
@@ -904,12 +904,6 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.9':
     resolution: {integrity: sha512-3Belt6tdc8bPgAtbcmdtNJlirVoTmEb5e2gC94PnkwEW9jI6CAHUeoG85tjWP5WquqfavoMtMwiG4P926ZKKuQ==}
-
-  '@lambdot/core@0.1.0':
-    resolution: {integrity: sha512-/SRt/o93Su0dO7sfGtXKMa2YbDBv3LF8UGDAy46P2Mfns9Y8eqJWG8Kbu6lOf7hRsFxI8qyfHgfJ4CK4b6IrIw==}
-
-  '@lambdot/websocket@0.1.0':
-    resolution: {integrity: sha512-7QJ6YYXYLaFffbVJZzamiwt8wGKrWxx8I/F+Tqszb4g5Ug+YZSAJI2IZnf+g2n9XtDbqxccTj6Z3q+aummlHmg==}
 
   '@manypkg/find-root@3.1.0':
     resolution: {integrity: sha512-BcSqCyKhBVZ5YkSzOiheMCV41kqAFptW6xGqYSTjkVTl9XQpr+pqHhwgGCOHQtjDCv7Is6EFyA14Sm5GVbVABA==}
@@ -1895,12 +1889,6 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.6.0
-
-  '@lambdot/core@0.1.0': {}
-
-  '@lambdot/websocket@0.1.0':
-    dependencies:
-      '@lambdot/core': link:packages/core/core
 
   '@manypkg/find-root@3.1.0':
     dependencies:

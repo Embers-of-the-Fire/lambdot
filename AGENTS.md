@@ -47,10 +47,14 @@ Releases are driven by [Changesets](https://changesets.dev) (`.changeset/`,
   published. Everything depends on `@lambdot/core`, so a core change
   cascades to all packages; a leaf change (e.g. `state-memory`) bumps only
   that leaf.
-- Inter-package dependency pins stay exact (`"0.1.0"` style); changesets
-  bumps them via `updateInternalDependencies: "patch"`. Do not switch them
-  to `workspace:*` — local `nub publish` forwards `workspace:` specifiers
-  verbatim, which would ship broken manifests.
+- Inter-package dependencies use `workspace:*` (in both `packages/` and
+  `examples/`), so local development always resolves against workspace
+  sources instead of stale registry copies. Changesets leaves the specifier
+  untouched when versioning; pnpm rewrites it to the exact workspace
+  version during `pnpm pack`/`publish`, so published manifests stay exact.
+  Never publish with `nub publish` — nub does not recognize the `workspace:`
+  protocol and forwards such specifiers verbatim, which would ship broken
+  manifests. Releases must go through the pnpm-based release workflow.
 
 ## Commits
 
