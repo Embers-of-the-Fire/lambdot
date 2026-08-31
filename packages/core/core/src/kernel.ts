@@ -233,6 +233,11 @@ class EngineRuntime implements RuntimeUnit {
         readonly name: string,
     ) {}
 
+    /** Public contract: apply the engine directly, like any other unit. */
+    apply(input: unknown, scope: Scope, config: unknown): Promise<unknown> {
+        return this.activate(input, scope, config);
+    }
+
     activate(input: unknown, scope: Scope, _config: unknown): Promise<unknown> {
         return this.inner.activate(input, scope, undefined);
     }
