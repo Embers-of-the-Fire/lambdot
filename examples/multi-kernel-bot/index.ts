@@ -1,32 +1,49 @@
-import { pumpStream } from "@lambdot/core";
+import type { Stream } from "@lambdot/core";
+import { createKernel, definePlugin, pumpStream } from "@lambdot/core";
 
-import { createEchoBot } from "./bot.ts";
+import { type BridgePort, createEchoBot, type WsEchoMessage } from "./bot.ts";
 import { startEchoServer } from "./server.ts";
 
 const serverA = await startEchoServer(8080);
 const serverB = await startEchoServer(8081);
 
-// The supervisor: owns every composition, controls startup/teardown order,
-// and is the only place cross-composition wiring happens.
-const botA = createEchoBot("A", `ws://127.0.0.1:${serverA.port}`);
-const botB = createEchoBot("B", `ws://127.0.0.1:${serverB.port}`);
-
-await Promise.all([botA.start(), botB.start()]);
-
-// Composition is explicit: a consumer on bot A's message stream, a typed
-// push handle on bot B's bridge. Messages starting with "@all " cross the
-// boundary; everything else stays inside its own composition. Both ends are
-// fully typed — no casts, no string rewriting, no core changes. Streams
-// broadcast, so the tap does not steal traffic from bot A's own pipeline.
-const unbridge = pumpStream(
-    botA.ctx.wsecho,
-    (event) => {
-        if (event.payload.startsWith("@all ")) {
-            botB.ctx.bridge.push(event.payload.slice("@all ".length));
-        }
+/**
+ * The supervisor's cross-kernel policy, expressed as an ordinary plugin:
+ * forward "@all " traffic from one bot's message stream into the other's
+ * bridge port. Its declared input is the narrow contract; the wiring
+ * mapping is typed against the engines' exposed surfaces — no casts, no
+ * string rewriting, and anything the engines don't expose is unnameable.
+ */
+const bridgeAll = definePlugin({
+    name: "bridge/all",
+    apply(input: { source: Stream<WsEchoMessage>; target: BridgePort }, scope) {
+        scope.onDispose(
+            pumpStream(
+                input.source,
+                (event) => {
+                    if (event.payload.startsWith("@all ")) {
+                        input.target.push(event.payload.slice("@all ".length));
+                    }
+                },
+                (error) => scope.onError(error),
+            ),
+        );
     },
-    console.error,
-);
+});
+
+// The supervisor is itself a kernel. Each bot is an engine nested under
+// its exposed name; the bridge is bound (it emits no namespace). Startup
+// and teardown order fall out of composition order: engines activate
+// first, the bridge pump last — and on stop the pump detaches before the
+// engines tear down.
+const supervisor = createKernel()
+    .use(createEchoBot("botA", `ws://127.0.0.1:${serverA.port}`))
+    .use(createEchoBot("botB", `ws://127.0.0.1:${serverB.port}`))
+    .bind(bridgeAll, {
+        mapping: (ctx) => ({ source: ctx.botA.wsecho, target: ctx.botB.bridge }),
+    });
+
+await supervisor.start();
 
 // Drive both bots and record every frame each driver receives.
 function drive(url: string) {
@@ -66,7 +83,7 @@ const driverB = drive(`ws://127.0.0.1:${serverB.port}`);
 await driverA.send("hello from A");
 await waitFor(driverA.messages, "echo: hello from A");
 
-// 2. The supervisor bridge forwards "@all" traffic from A into B.
+// 2. The bridge forwards "@all" traffic from A into B.
 await driverA.send("@all hello everyone");
 await waitFor(driverA.messages, "echo: @all hello everyone");
 await waitFor(driverB.messages, "echo: hello everyone");
@@ -76,8 +93,7 @@ await new Promise((resolve) => setTimeout(resolve, 200));
 
 driverA.close();
 driverB.close();
-void unbridge();
-await Promise.all([botA.stop(), botB.stop()]);
+await supervisor.stop();
 await serverA.close();
 await serverB.close();
 
@@ -92,4 +108,4 @@ if (
     );
     process.exit(1);
 }
-console.log("multi-kernel-bot: OK — isolated dispatch, explicit bridge");
+console.log("multi-kernel-bot: OK — isolated dispatch, typed engine bridge");

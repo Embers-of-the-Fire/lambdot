@@ -134,6 +134,9 @@ class CompositeRuntime implements RuntimeUnit {
         this.onError = options.onError ?? defaultOnError;
     }
 
+    /** Set by `expose`: composing onto a sealed chain is a runtime error. */
+    private exposed: string | undefined;
+
     use(unit: RuntimeUnit, options?: WireOptions): this {
         return this.add(unit, options, true);
     }
@@ -142,7 +145,18 @@ class CompositeRuntime implements RuntimeUnit {
         return this.add(unit, options, false);
     }
 
+    /** Seal the chain and return it as a named engine — the final artifact. */
+    expose(name: string): EngineRuntime {
+        // Explicit undefined check: "" is a valid name and must still seal.
+        if (this.exposed !== undefined)
+            throw new Error(`kernel already exposed as engine "${this.exposed}"`);
+        this.exposed = name;
+        return new EngineRuntime(this, name);
+    }
+
     private add(unit: RuntimeUnit, options: WireOptions | undefined, visible: boolean): this {
+        if (this.exposed !== undefined)
+            throw new Error(`cannot compose onto a kernel exposed as engine "${this.exposed}"`);
         const entry: Entry = {
             unit,
             key: options?.as ?? unit.name,
@@ -204,6 +218,40 @@ class CompositeRuntime implements RuntimeUnit {
         if (entry.visible) this.ctx[entry.key] = output;
         else this.hidden[entry.key] = output;
         this.activated.push({ entry, disposers });
+    }
+}
+
+/**
+ * The runtime behind `Composite.expose`: a thin, sealed façade over the
+ * chain. Lifecycle delegates to the inner composition; as a nested unit it
+ * activates exactly like the chain itself — the only difference is the name
+ * and the erased type.
+ */
+class EngineRuntime implements RuntimeUnit {
+    constructor(
+        private readonly inner: CompositeRuntime,
+        readonly name: string,
+    ) {}
+
+    /** Public contract: apply the engine directly, like any other unit. */
+    apply(input: unknown, scope: Scope, config: unknown): Promise<unknown> {
+        return this.activate(input, scope, config);
+    }
+
+    activate(input: unknown, scope: Scope, _config: unknown): Promise<unknown> {
+        return this.inner.activate(input, scope, undefined);
+    }
+
+    start(input?: unknown): Promise<void> {
+        return this.inner.start(input);
+    }
+
+    stop(): Promise<void> {
+        return this.inner.stop();
+    }
+
+    get ctx(): Record<string, unknown> {
+        return this.inner.ctx;
     }
 }
 

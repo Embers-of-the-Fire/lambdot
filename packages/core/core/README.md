@@ -48,6 +48,14 @@ as })` feeds a plugin from the namespaces visible so far and exposes its
   composition order — resolve mapping, validate config, `apply` — and
   `stop()` disposes in reverse. Ordering mistakes are compile errors in the
   mappings, not runtime states.
+- **`expose(name)` seals a chain into a final engine.** The engine is the
+  chain as an artifact: named, runnable (`start`/`stop`/`ctx`), and wireable
+  into a supervisor kernel under its new name — but no longer composable
+  (`use`/`bind` are gone from the type and throw at runtime). Its type is
+  exactly `Engine<TIn, TVisible, TName>`: the chain's external input
+  requirement survives, while the `bind`-encapsulated internals and the
+  chain's own name are erased. This is how N instances of one bot stack nest
+  into a supervisor without name tags or leaked internals.
 
 ## Usage
 
@@ -111,7 +119,8 @@ Types, grouped by theme:
 - **Streams** — `Stream`, `Channel`.
 - **Plugins** — `Plugin` (name, `Config`, `apply`, plus the composition
   methods), `PluginSpec` (the author-facing half), `Scope` (`onDispose` /
-  `onError`), `Composite` (a composed chain — itself wireable), `AnyUnit`.
+  `onError`), `Composite` (a composed chain — itself wireable), `Engine`
+  (a chain sealed by `expose`: final, named, internals erased), `AnyUnit`.
 - **The composition types** — `InOf`, `OutOf`, `ConfigOf`, `NameOf`,
   `WireArgs` (the `use`/`bind` options: `mapping` required when identity
   wiring fails, `option` required when config is non-void, `as` to rename),
