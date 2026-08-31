@@ -18,6 +18,10 @@ jobs:
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v7
+              with:
+                  # Later steps execute repository-controlled scripts and do
+                  # not require authenticated Git operations.
+                  persist-credentials: false
 
             # Installs pnpm (pinned via packageManager/devEngines.packageManager)
             # and the pinned Node runtime (devEngines.runtime), then runs
