@@ -1,4 +1,4 @@
-import type { Message, Plugin, Stream } from "@lambdot/core";
+import type { Engine, Message, Plugin, Stream } from "@lambdot/core";
 import {
     channel,
     createKernel,
@@ -48,34 +48,50 @@ const ingress = definePlugin({
     },
 });
 
+/** The engine's public surface: the inbound stream to tap and the port to push into. */
+export interface EchoBotSurface {
+    readonly wsecho: Stream<WsEchoMessage>;
+    readonly bridge: BridgePort;
+}
+
 /**
- * One bot = one composition. The stack is byte-for-byte identical for every
- * instance — same "wsecho" platform, same namespace names — because each
- * composition's namespaces are private. Instance identity lives in the
- * factory arguments (name for logs, url for the socket), not in type-level
- * names.
+ * One bot = one composition, sealed by `expose` into an engine. The stack
+ * is byte-for-byte identical for every instance — same "wsecho" platform,
+ * same namespace names — because each composition's namespaces are private.
+ * Instance identity lives in the factory arguments (name for logs and the
+ * engine's namespace, url for the socket), not in type-level name tags.
+ *
+ * Exposure erases the internals: `ingress`, `reply`, and both transport
+ * halves are `bind`ed, so the engine's type is exactly
+ * `Engine<void, EchoBotSurface, TName>` — the supervisor sees the inbound
+ * stream and the push port, nothing else. `TName` is inferred as a literal,
+ * so the supervisor's ctx keys stay exact.
  */
-export function createEchoBot(name: string, url: string) {
+export function createEchoBot<const TName extends string>(
+    name: TName,
+    url: string,
+): Engine<void, EchoBotSurface, TName> {
     const wsecho = wsPlatform("wsecho", echoSpec);
     const reply = definePlugin({
         name: "reply",
         apply(input: { ingress: Stream<WsEchoMessage> }) {
             return mapStream(input.ingress, (event) => {
-                console.log(`[bot ${name}] id=${event.id} payload=${event.payload}`);
+                console.log(`[${name}] id=${event.id} payload=${event.payload}`);
                 return { address: event.address, content: `echo: ${event.payload}` };
             });
         },
     });
 
-    return createKernel({ onError: (error) => console.error(`[bot ${name}]`, error) })
+    return createKernel({ onError: (error) => console.error(`[${name}]`, error) })
         .bind(wsecho.transport, { option: { url } })
         .use(wsecho.input, { mapping: (ctx) => ({ connection: ctx["wsecho/transport"] }) })
         .use(bridgePort())
-        .use(ingress)
-        .use(reply)
+        .bind(ingress)
+        .bind(reply)
         .bind(wsecho.output, {
             mapping: (ctx) => ({ connection: ctx["wsecho/transport"], commands: ctx.reply }),
-        });
+        })
+        .expose(name);
 }
 
 export type EchoBot = ReturnType<typeof createEchoBot>;
