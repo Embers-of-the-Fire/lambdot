@@ -1,0 +1,9 @@
+packages:
+    - packages/*/*
+    - examples/*
+# pnpm blocks dependency build scripts until reviewed (strictDepBuilds);
+# both are binary-validation postinstalls of trusted packages (examples'
+# miniflare toolchain), safe to run.
+allowBuilds:
+    esbuild: true
+    workerd: true

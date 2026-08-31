@@ -9,6 +9,6 @@
         "access": "public"
     },
     "dependencies": {
-        "@lambdot/core": "0.1.0"
+        "@lambdot/core": "workspace:*"
     }
 }

@@ -2,10 +2,6 @@
     "name": "lambdot",
     "version": "0.0.1",
     "private": true,
-    "workspaces": [
-        "packages/*/*",
-        "examples/*"
-    ],
     "type": "module",
     "scripts": {
         "fmt": "oxfmt",
@@ -14,6 +10,8 @@
         "lint:fix": "oxlint --fix"
     },
     "devDependencies": {
+        "@changesets/changelog-github": "^1.0.0",
+        "@changesets/cli": "^3.0.1",
         "@nubjs/types": ">=0.4.13 <=0.8.0",
         "@types/node": "^26",
         "oxfmt": "^0.65.0",
@@ -23,10 +21,14 @@
     },
     "devEngines": {
         "packageManager": {
-            "name": "nub",
-            "version": "^0.8.0",
-            "onFail": "ignore"
+            "name": "pnpm",
+            "version": "11.22.0",
+            "onFail": "warn"
+        },
+        "runtime": {
+            "name": "node",
+            "version": "26.8.1"
         }
     },
-    "packageManager": "nub@0.8.0"
+    "packageManager": "pnpm@11.22.0"
 }

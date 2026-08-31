@@ -14,31 +14,26 @@ concurrency:
 
 jobs:
     check:
-        name: Format / Lint / Typecheck
+        name: Format / Lint
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v7
-
-            # Drop-in replacement for actions/setup-node: installs nub and
-            # provisions the project's pinned Node (from .node-version).
-            - uses: nubjs/setup-nub@v0
               with:
-                  cache-dependency-path: nub.lock
+                  # Later steps execute repository-controlled scripts and do
+                  # not require authenticated Git operations.
+                  persist-credentials: false
 
-            - name: Install dependencies
-              run: nub install --frozen-lockfile
+            # Installs pnpm (pinned via packageManager/devEngines.packageManager)
+            # and the pinned Node runtime (devEngines.runtime), then runs
+            # pnpm install (frozen lockfile is pnpm's default under CI).
+            - uses: pnpm/setup@v2
+              with:
+                  cache: true
 
             - name: Check formatting
-              run: nub run fmt:check
+              run: pnpm run fmt:check
 
+            # oxlint runs type-aware with typeCheck: true (.oxlintrc.json) —
+            # it subsumes tsc --noEmit; there is no separate typecheck step.
             - name: Lint
-              run: nub run lint
-
-            - name: Typecheck
-              run: |
-                  for project in packages/*/* examples/*; do
-                    echo "::group::tsc -p $project"
-                    npx tsc -p "$project"
-                    echo "::endgroup::"
-                  done
-              shell: bash
+              run: pnpm run lint

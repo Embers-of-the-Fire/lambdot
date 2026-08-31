@@ -84,9 +84,9 @@ compiles when the declared input is already visible (otherwise the
 `mapping` becomes a required argument), mappings are checked against
 the namespaces visible at that point in the chain with compatible
 types, and duplicate namespaces are rejected. The file is in this
-package's `tsconfig.json`, so it runs with the per-project typecheck
-(`npx tsc -p examples/echo-bot`), and the root `nub run lint` is
-type-aware as well.
+package's `tsconfig.json`, so the root `nub run lint` — oxlint is
+type-aware (`typeCheck`) and subsumes `tsc --noEmit` — checks it along
+with everything else.
 [`websocket-bot/type-test.ts`](../websocket-bot/type-test.ts) mirrors
 these assertions through the generic `@lambdot/websocket` factories,
 plus required options and two platforms side by side.

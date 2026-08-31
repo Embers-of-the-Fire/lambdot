@@ -1,0 +1,22 @@
+{
+    "$schema": "https://unpkg.com/@changesets/config@4/schema.json",
+    "changelog": ["@changesets/changelog-github", { "repo": "Embers-of-the-Fire/lambdot" }],
+    "commit": false,
+    "linked": [
+        [
+            "@lambdot/console",
+            "@lambdot/core",
+            "@lambdot/env",
+            "@lambdot/host-cloudflare",
+            "@lambdot/logging",
+            "@lambdot/protocol-qq",
+            "@lambdot/state-memory",
+            "@lambdot/state-sqlite",
+            "@lambdot/websocket"
+        ]
+    ],
+    "access": "public",
+    "baseBranch": "main",
+    "updateInternalDependencies": "patch",
+    "format": "oxfmt"
+}

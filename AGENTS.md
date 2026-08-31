@@ -1,128 +1,62 @@
 # AGENTS.md
 
-## Toolchain — use `nub`, never npm/pnpm/yarn
+## Toolchain
 
-This repo is managed by **nub** (`packageManager: nub@0.8.0`). It comes from
-the flake dev shell (`direnv` loads it via `.envrc`); do not substitute other
-package managers.
+- Local development uses **nub**, provided by the flake dev shell
+  (`nix develop`, auto-loaded via `.envrc`/direnv). Use `nub install`,
+  `nub run <script>`, `nub <file>.ts`.
+- CI uses plain **pnpm**, provisioned by `pnpm/setup@v2`. Do not add
+  `nubjs/setup-nub` or `actions/setup-node` to workflows.
+- The Node.js pin lives in `devEngines.runtime` in the root `package.json`
+  (currently node 26.8.1). It is the single source of truth: nub reads it
+  locally, `pnpm/setup` reads it in CI. There is no `.node-version` file.
+- The pnpm pin lives in `packageManager` / `devEngines.packageManager`
+  (currently pnpm 11.22.0); the lockfile is `pnpm-lock.yaml`.
 
-- `nub install` — install deps (lockfile is `nub.lock`)
-- `nub run lint` / `nub run fmt` / `nub run fmt:check`
-- `nub run -F @lambdot-example/echo-bot start` — run one workspace script
-- `nub examples/echo-bot/index.ts` — nub executes TypeScript directly; there is
-  **no build step**
+## Validation
 
-## Verification
+After any change, run the formatter and the linter:
 
-There is **no test runner and no test suite**. Verification is, in order:
+| Command        | Action                                                               |
+| -------------- | -------------------------------------------------------------------- |
+| `nub run fmt`  | format with oxfmt (`fmt:check` to verify)                            |
+| `nub run lint` | lint with oxlint — type-aware, subsumes `tsc --noEmit` (`typeCheck`) |
 
-1. `nub run fmt:check`
-2. `nub run lint` — oxlint with `typeAware` + `typeCheck` enabled (backed by
-   `oxlint-tsgolint`), so it subsumes a root-level `tsc --noEmit`
-3. Per-project typecheck, because the root `tsconfig.json` has `"files": []`
-   and checks nothing:
-
-    ```sh
-    for project in packages/*/* examples/*; do npx tsc -p "$project"; done
-    ```
-
-This mirrors `.github/workflows/ci.yml`. Run all three before finishing.
+oxlint is the only typechecker. Do not add `tsc` invocations anywhere;
+`typescript` is a devDependency only to support oxlint's type-aware linting.
 
 ## Releases
 
-Release automation is release-plz-style, built on release-please
-(`release-please-config.json` + `.release-please-manifest.json` +
-`.github/workflows/release.yml`):
+Releases are driven by [Changesets](https://changesets.dev) (`.changeset/`,
+`@changesets/cli` v3), automated by the `changesets/action` v2 sub-actions in
+`.github/workflows/release.yml`:
 
-- Pushing conventional commits to `main` maintains a single release PR that
-  bumps all `@lambdot/*` packages in lockstep (`linked-versions` plugin) and
-  updates their `CHANGELOG.md` files. Pre-1.0 semantics
-  (`bump-minor-pre-major`): `feat` and breaking changes bump minor, `fix`
-  bumps patch. To cut 1.0.0, set `"release-as": "1.0.0"` in the config for
-  one release cycle.
-- Merging the release PR tags each package (`<component>-vX.Y.Z`), creates
-  the GitHub releases, and publishes to npm with provenance. Publishing
-  authenticates via **npm Trusted Publishing** (OIDC): each package needs a
-  Trusted Publisher entry on npmjs.com pointing at this repo and
-  `release.yml`, and the workflow assumes every package already exists on
-  npm. Bootstrap a brand-new package by publishing a placeholder manually
-  (`nub publish`) and then adding its Trusted Publisher entry.
-- Inter-package pins in publishable packages are exact (`"0.1.0"`, never
-  `workspace:*` — nub forwards `workspace:` specs to registries verbatim)
-  and are bumped in every release PR by release-please's `node-workspace`
-  plugin (`merge: false`, paired with `linked-versions`). Private
-  `examples/*` keep `workspace:*` so they always link the local packages.
-  Because nub.lock records those pins as specifiers, the `lockfile` job in
-  `release.yml` runs after any release-please run that didn't cut releases
-  (and on `workflow_dispatch`, to repair an already-stale PR): if the release
-  PR branch exists and its nub.lock is stale, it pushes a `nub install` sync
-  commit, refusing any diff beyond `specifier:` bumps. Without it the release
-  PR (and `main` after merging it) fails `nub install --frozen-lockfile`.
-- A new publishable package must be registered in both release-please files:
-  `packages` + the `linked-versions` `components` list in the config (same
-  component name in both), and the manifest.
-
-## Repo-specific rules that will bite you
-
-- **Packages ship raw TypeScript source** — `exports` points at
-  `./src/index.ts`, `tsconfig.base.json` sets `allowImportingTsExtensions` +
-  `noEmit`. Import workspace code with explicit `.ts` extensions; never add
-  emit/build config.
-- **`verbatimModuleSyntax` is on** — use `import type` for type-only imports or
-  lint/tsc will fail. Also strict: `exactOptionalPropertyTypes`,
-  `noUncheckedIndexedAccess`.
-- **Formatting is oxfmt**: 4-space indent, `sortImports: true` (imports get
-  reordered automatically).
-- **Inter-package deps under `packages/` are exact pins** (e.g. `"0.1.0"`),
-  bumped automatically in release PRs. `workspace:*` is for `examples/*`
-  only — never use it in a publishable package.
-- **TypeScript is v7** (native/tsgo-era). Do not assume tsc v5 behavior.
-- **Node version is pinned** in `.node-version` (provisioned by nub /
-  `nubjs/setup-nub` in CI).
-
-## Architecture in one breath
-
-Monorepo: `packages/<category>/*` (`@lambdot/*`) and `examples/*`
-(`@lambdot-example/*`). Package categories: `core` (the kernel plus
-platform-agnostic pieces — the `console` reference platform, the
-`websocket` transport factories, `env` for reading `process.env` into a
-typed namespace, and `logging` for the `Logger` ctx hook and its pluggable
-record sinks), `protocol` (chat-service wire protocols: `qq` serves both
-QQ infras — the websocket gateway and the webhook (reversed post) — over one
-REST client; discord, ... none yet), `host` (hosting/runtime integrations:
-cloudflare — a worker's named KV/D1/R2/Durable-Object bindings and plain
-environment variables as typed namespaces, KV- and DO-storage-backed
-`StateBackend` bridges, and `wsHub`, the server-side (Durable Object)
-mirror of `wsTransport`), `state` (`StateBackend`
-implementations like `memory`, plus `sqlite` which owns a `node:sqlite`
-connection and emits it as its namespace value, D1-style).
-
-**A plugin is a function**: `apply(input, scope, config)` maps a declared
-input record to an output value. Composition is `use`/`bind`: each wires the
-next plugin's input with an optional `mapping` (a function from the
-namespaces visible so far — omitted when the plugin's input keys already
-match, since the type check is ordinary assignability) and exposes the
-plugin's output under its name — `use` puts it on the final `ctx`, `bind`
-keeps it internal to the chain (visible to later `mapping`s only). Because
-the mapping's parameter is typed as what is visible _so far_, wiring a
-plugin before its dependencies is a compile error. `option` carries the
-plugin's config (Standard-Schema validated) and is required exactly when the
-config type is non-void. There are no plugin roles: platforms are ordinary
-plugins whose inputs/outputs are **streams** (`Stream<T>`, an
-`AsyncIterable` with broadcast semantics — every consumer sees every item).
-Inputs emit message streams (`channel` + `shareStream`), features transform
-them (`mapStream`/`filterStream`/`mergeStreams`), outputs consume command
-streams (`pumpStream`), filtering by `address.platform`. Platform-specific
-services (the qq REST client, a webhook handler, a state backend) are just
-non-stream namespace values. Factory type params that end up as namespace
-keys or record keys need the `const` modifier (`const TName extends string`)
-or inline calls widen literals to `string`.
-
-`examples/echo-bot/type-test.ts` is a compile-time test suite: every
-`@ts-expect-error` line must remain a genuine error. Do not "fix" the flagged
-expressions; fix the types if they stop erroring.
+- Any releasable change must include a committed `.changeset/*.md` file
+  (create one with `nub exec changeset` / `pnpm changeset`). Bump types
+  (patch/minor/major) are declared per changeset, not inferred from commit
+  messages.
+- On pushes to `main`, the release workflow either opens/refreshes the
+  "Version Packages" PR (manifests, CHANGELOG.md files, and `pnpm-lock.yaml`
+  are updated in the same commit — the lockfile cannot drift) or, when that
+  PR is merged, publishes to npm via OIDC trusted publishing (no npm tokens).
+- Tags and GitHub releases use the `@lambdot/core@0.2.0` format. (Old
+  `core-v0.1.0`-style tags from the release-please era remain as history.)
+- All nine `@lambdot/*` packages are in one `linked` group: they share the
+  highest current version and highest bump type, but only packages with
+  changesets — or that depend on a bumped package — are versioned and
+  published. Everything depends on `@lambdot/core`, so a core change
+  cascades to all packages; a leaf change (e.g. `state-memory`) bumps only
+  that leaf.
+- Inter-package dependencies use `workspace:*` (in both `packages/` and
+  `examples/`), so local development always resolves against workspace
+  sources instead of stale registry copies. Changesets leaves the specifier
+  untouched when versioning; pnpm rewrites it to the exact workspace
+  version during `pnpm pack`/`publish`, so published manifests stay exact.
+  Never publish with `nub publish` — nub does not recognize the `workspace:`
+  protocol and forwards such specifiers verbatim, which would ship broken
+  manifests. Releases must go through the pnpm-based release workflow.
 
 ## Commits
 
-Conventional Commits (`feat:`, `chore:`, `ci:`, ...), matching the existing
-history.
+Commit messages follow conventional-commit style (`feat(core): ...`) for
+history readability. They no longer drive releases — only changesets do.
