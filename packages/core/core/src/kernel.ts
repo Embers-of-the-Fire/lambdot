@@ -147,13 +147,15 @@ class CompositeRuntime implements RuntimeUnit {
 
     /** Seal the chain and return it as a named engine — the final artifact. */
     expose(name: string): EngineRuntime {
-        if (this.exposed) throw new Error(`kernel already exposed as engine "${this.exposed}"`);
+        // Explicit undefined check: "" is a valid name and must still seal.
+        if (this.exposed !== undefined)
+            throw new Error(`kernel already exposed as engine "${this.exposed}"`);
         this.exposed = name;
         return new EngineRuntime(this, name);
     }
 
     private add(unit: RuntimeUnit, options: WireOptions | undefined, visible: boolean): this {
-        if (this.exposed)
+        if (this.exposed !== undefined)
             throw new Error(`cannot compose onto a kernel exposed as engine "${this.exposed}"`);
         const entry: Entry = {
             unit,
