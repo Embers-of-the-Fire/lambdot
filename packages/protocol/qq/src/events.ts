@@ -1,23 +1,20 @@
-import type { Address, Command, Message, Stream } from "@lambdot/core";
-
 /**
- * Where a qq message goes. Owned by the output half of the qq platform —
- * outputs consume addresses, inputs produce them. `msgId`/`msgSeq` carry the
- * passive-reply reference (`msg_id`/`msg_seq`) from the triggering message;
- * omit both for an active (proactive) message.
+ * Where a qq message goes. `msgId`/`msgSeq` carry the passive-reply
+ * reference (`msg_id`/`msg_seq`) from the triggering message; omit both for
+ * an active (proactive) message.
  */
-export interface QqAddress extends Address<"qq"> {
+export interface QqAddress {
     /** Which conversation the message belongs to. */
     readonly scope: "group" | "c2c";
     /** `group_openid` for groups, the user's openid for C2C. */
     readonly openid: string;
     /** Passive-reply reference, from the triggering event's `d.id`. */
     readonly msgId?: string;
-    /** Passive-reply sequence; the output auto-increments it per reply. */
+    /** Passive-reply sequence; auto-incremented per reply when omitted. */
     readonly msgSeq?: number;
 }
 
-/** The payload produced by qq message inputs: plain-text content only. */
+/** One decoded qq message: plain-text content only. */
 export interface QqMessage {
     /** Message id (`msg_id`), reused as the passive-reply reference. */
     readonly id: string;
@@ -25,15 +22,6 @@ export interface QqMessage {
     readonly authorOpenid: string;
     readonly timestamp: string;
 }
-
-/**
- * The qq platform's stream contracts: inputs emit message streams, features
- * emit command streams, outputs consume them. Features written against these
- * two types run on either infra (gateway or webhook) — the wiring `mapping`
- * is the platform adapter.
- */
-export type QqMessageStream = Stream<Message<QqMessage, QqAddress>>;
-export type QqCommandStream = Stream<Command<QqAddress, string>>;
 
 /** The wire shape of a `GROUP_AT_MESSAGE_CREATE` dispatch body. */
 interface QqRawGroupMessage {
@@ -53,14 +41,13 @@ interface QqRawC2cMessage {
 }
 
 /**
- * Decode a dispatch (`t`, `d`) pair into a message, or null to ignore it.
- * Shared by the gateway and webhook inputs — both transports deliver the
- * same `{op, t, d}` envelope.
+ * Decode a dispatch (`t`, `d`) pair into a message and its reply address,
+ * or null to ignore it.
  */
 export function decodeMessageEvent(
     t: string,
     d: unknown,
-): { payload: QqMessage; address: QqAddress } | null {
+): { message: QqMessage; address: QqAddress } | null {
     if (typeof d !== "object" || d === null) return null;
 
     if (t === "GROUP_AT_MESSAGE_CREATE") {
@@ -73,7 +60,7 @@ export function decodeMessageEvent(
         )
             return null;
         return {
-            payload: {
+            message: {
                 id: raw.id,
                 // The platform strips the @bot prefix but leaves padding.
                 content: raw.content.trim(),
@@ -81,7 +68,6 @@ export function decodeMessageEvent(
                 timestamp: typeof raw.timestamp === "string" ? raw.timestamp : "",
             },
             address: {
-                platform: "qq",
                 scope: "group",
                 openid: raw.group_openid,
                 msgId: raw.id,
@@ -98,14 +84,13 @@ export function decodeMessageEvent(
         )
             return null;
         return {
-            payload: {
+            message: {
                 id: raw.id,
                 content: raw.content.trim(),
                 authorOpenid: raw.author.user_openid,
                 timestamp: typeof raw.timestamp === "string" ? raw.timestamp : "",
             },
             address: {
-                platform: "qq",
                 scope: "c2c",
                 openid: raw.author.user_openid,
                 msgId: raw.id,

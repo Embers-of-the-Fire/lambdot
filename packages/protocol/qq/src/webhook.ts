@@ -1,108 +1,145 @@
-import type { Message, Plugin } from "@lambdot/core";
-import { channel, definePlugin, message, shareStream } from "@lambdot/core";
+import type { Disposer, Plugin } from "@lambdot/core";
+import { definePlugin } from "@lambdot/core";
+import type { HttpServer } from "@lambdot/http";
 import nacl from "tweetnacl";
 
+import { createQqApi } from "./api.ts";
 import { readQqCredentials, type QqCredentialKeys } from "./credentials.ts";
-import type { QqAddress, QqMessage, QqMessageStream } from "./events.ts";
-import { decodeMessageEvent } from "./events.ts";
+import { decodeMessageEvent, type QqMessage } from "./events.ts";
 
 /**
- * The request bridge, emitted as the plugin's namespace value: the HTTP
- * route lives outside the composition (a hono handler, a worker's fetch), so
- * it hands each callback request to `handle` and sends back the returned
- * response. Decoded message dispatches join the `messages` stream.
+ * One decoded message delivered to a {@link QqWebhook} listener, with its
+ * reply channel: `reply` sends a passive reply back to the conversation the
+ * message arrived from (the address — scope, openid, `msg_id` reference —
+ * travels with the event, not in a shared envelope).
+ */
+export interface QqMessageEvent {
+    readonly message: QqMessage;
+    /** Passively reply to this message's conversation. */
+    reply(content: string): Promise<void>;
+}
+
+/**
+ * The webhook service, emitted as the plugin's item map: subscribe to
+ * decoded message dispatches. Where the callback route lives is the host's
+ * decision — the plugin only knows the abstract `HttpServer` it registers
+ * on.
  */
 export interface QqWebhook {
-    handle(request: Request): Promise<Response>;
-    readonly messages: QqMessageStream;
+    /** Subscribe to decoded message events. The disposer unsubscribes. */
+    onMessage(listener: (event: QqMessageEvent) => void): Disposer;
 }
 
 export interface QqWebhookConfig {
+    /** The callback route to register on the router; defaults to `"/qq/callback"`. */
+    readonly path?: string;
     /** Which env variables carry the credentials. */
     readonly keys?: QqCredentialKeys;
+    /** Open-platform base URL; override to point at a mock in tests. */
+    readonly apiBase?: string;
 }
 
 /**
- * The webhook (reversed-post) input: QQ pushes events to an HTTPS callback
- * address. Emits a {@link QqWebhook} that implements the callback algorithm —
- * op 13 address validation (sign `event_ts + plain_token`), ed25519
- * verification of `X-Signature-Ed25519` over `timestamp + body` for
- * everything else — then pushes message dispatches to the stream. The bot
- * secret seeds the ed25519 keypair (repeated to 32 bytes).
+ * The webhook (reversed-post) half of the qq protocol: QQ pushes events to
+ * an HTTPS callback address. The plugin registers the callback route on the
+ * wired-in {@link HttpServer} and implements the callback algorithm — op 13
+ * address validation (sign `event_ts + plain_token`), ed25519 verification
+ * of `X-Signature-Ed25519` over `timestamp + body` for everything else —
+ * then delivers decoded message dispatches to `onMessage` listeners. The
+ * bot secret seeds the ed25519 keypair (repeated to 32 bytes). The route
+ * lives as long as the host's server; the listeners clear when the owning
+ * scope disposes.
  *
  * ```ts
- * .use(qqWebhook("qq"), { option: {}, mapping: (ctx) => ({ env: ctx["qq-env"] }) });
- * // in the hono route: return kernel.ctx.qq.handle(c.req.raw);
+ * app.with(envVars("qq-env", ["QQ_BOT_APP_ID", "QQ_BOT_APP_SECRET"]))
+ *    .use(qqWebhook("qq"), {
+ *        option: {},
+ *        mapping: (ctx) => ({ http: ctx.http, env: ctx["qq-env"] }),
+ *    });
  * ```
  */
 export function qqWebhook<const TName extends string>(
     name: TName,
-): Plugin<{ env: Readonly<Record<string, string>> }, QqWebhook, QqWebhookConfig, TName> {
+): Plugin<
+    { http: HttpServer; env: Readonly<Record<string, string>> },
+    QqWebhook,
+    QqWebhookConfig,
+    TName
+> {
     return definePlugin({
         name,
         apply(input, scope, config) {
             const credentials = readQqCredentials(input.env, config.keys);
+            const api = createQqApi(credentials, config);
             // The bot secret seeds the ed25519 keypair: repeat to 32 bytes.
             let seed = credentials.clientSecret;
             while (seed.length < 32) seed += seed;
             const keyPair = nacl.sign.keyPair.fromSeed(new TextEncoder().encode(seed.slice(0, 32)));
 
-            const messages = channel<Message<QqMessage, QqAddress>>();
+            const listeners = new Set<(event: QqMessageEvent) => void>();
             scope.onDispose(() => {
-                messages.close();
+                listeners.clear();
             });
 
-            const webhook: QqWebhook = {
-                // Shared: several consumers may subscribe to the stream.
-                messages: shareStream(messages.stream),
-                async handle(request) {
-                    if (request.method !== "POST")
-                        return new Response("method not allowed", { status: 405 });
-                    const body = await request.text();
-                    let frame: { op?: unknown; d?: unknown; t?: unknown };
-                    try {
-                        frame = JSON.parse(body) as typeof frame;
-                    } catch {
+            input.http.on("POST", config.path ?? "/qq/callback", async (c) => {
+                const request = c.req.raw;
+                const body = await request.text();
+                let frame: { op?: unknown; d?: unknown; t?: unknown };
+                try {
+                    frame = JSON.parse(body) as typeof frame;
+                } catch {
+                    return new Response("bad request", { status: 400 });
+                }
+
+                // op 13: callback-address validation. Sign, no verify.
+                if (frame.op === 13) {
+                    const d = frame.d as
+                        | { plain_token?: unknown; event_ts?: unknown }
+                        | null
+                        | undefined;
+                    if (typeof d?.plain_token !== "string" || typeof d.event_ts !== "string")
                         return new Response("bad request", { status: 400 });
-                    }
+                    const signature = toHex(
+                        nacl.sign.detached(
+                            new TextEncoder().encode(d.event_ts + d.plain_token),
+                            keyPair.secretKey,
+                        ),
+                    );
+                    return Response.json({ plain_token: d.plain_token, signature });
+                }
 
-                    // op 13: callback-address validation. Sign, no verify.
-                    if (frame.op === 13) {
-                        const d = frame.d as
-                            | { plain_token?: unknown; event_ts?: unknown }
-                            | null
-                            | undefined;
-                        if (typeof d?.plain_token !== "string" || typeof d.event_ts !== "string")
-                            return new Response("bad request", { status: 400 });
-                        const signature = toHex(
-                            nacl.sign.detached(
-                                new TextEncoder().encode(d.event_ts + d.plain_token),
-                                keyPair.secretKey,
-                            ),
-                        );
-                        return Response.json({ plain_token: d.plain_token, signature });
-                    }
+                // Everything else: verify the ed25519 signature over
+                // timestamp + body before trusting the payload.
+                const signature = request.headers.get("x-signature-ed25519");
+                const timestamp = request.headers.get("x-signature-timestamp");
+                if (
+                    signature === null ||
+                    timestamp === null ||
+                    !verify(keyPair.publicKey, timestamp + body, signature)
+                )
+                    return new Response("unauthorized", { status: 401 });
 
-                    // Everything else: verify the ed25519 signature over
-                    // timestamp + body before trusting the payload.
-                    const signature = request.headers.get("x-signature-ed25519");
-                    const timestamp = request.headers.get("x-signature-timestamp");
-                    if (
-                        signature === null ||
-                        timestamp === null ||
-                        !verify(keyPair.publicKey, timestamp + body, signature)
-                    )
-                        return new Response("unauthorized", { status: 401 });
-
-                    if (frame.op === 0 && typeof frame.t === "string") {
-                        const decoded = decodeMessageEvent(frame.t, frame.d);
-                        if (decoded) messages.push(message(decoded.payload, decoded.address));
+                if (frame.op === 0 && typeof frame.t === "string") {
+                    const decoded = decodeMessageEvent(frame.t, frame.d);
+                    if (decoded) {
+                        const event: QqMessageEvent = {
+                            message: decoded.message,
+                            reply: (content) => api.sendMessage(decoded.address, content),
+                        };
+                        for (const listener of listeners) listener(event);
                     }
-                    return Response.json({});
+                }
+                return Response.json({});
+            });
+
+            return {
+                onMessage(listener) {
+                    listeners.add(listener);
+                    return () => {
+                        listeners.delete(listener);
+                    };
                 },
             };
-
-            return webhook;
         },
     });
 }

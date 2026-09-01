@@ -1,4 +1,4 @@
-import type { Disposer, Plugin, StateBackend } from "@lambdot/core";
+import type { Disposer, Plugin } from "@lambdot/core";
 import { definePlugin } from "@lambdot/core";
 
 import type { DurableObjectNamespace, DurableObjectStorage } from "./bindings.ts";
@@ -9,14 +9,14 @@ export interface DurableObjectNamespaceConfig {
 }
 
 /**
- * Emit one named Durable Object namespace binding as the plugin's namespace
- * value. Instances multiply by name, exactly like `kvNamespace`. Routing to
- * an instance stays in the worker's fetch handler — read the namespace back
- * from the composition's ctx:
+ * Emit one named Durable Object namespace binding as the plugin's item map.
+ * Instances multiply by name, exactly like `kvNamespace`. Routing to an
+ * instance stays in the worker's fetch handler — read the namespace back
+ * from the composition's item map:
  *
  * ```ts
- * createKernel().use(durableObjectNamespace("rooms"), { option: { binding: env.ROOM } });
- * // ctx.rooms.get(ctx.rooms.idFromName(name)).fetch(request)
+ * app.with(durableObjectNamespace("rooms"), { option: { binding: env.ROOM } });
+ * // items.rooms.get(items.rooms.idFromName(name)).fetch(request)
  * ```
  */
 export function durableObjectNamespace<const TCap extends string>(
@@ -30,63 +30,55 @@ export function durableObjectNamespace<const TCap extends string>(
     });
 }
 
-/** Config for {@link doState}: the instance's storage, from the Durable Object's constructor state. */
+/** Config for {@link doStorage}: the instance's storage, from the Durable Object's constructor state. */
 export interface DoStorageConfig {
     readonly storage: DurableObjectStorage;
 }
 
 /**
- * Bridge a Durable Object's own transactional storage into a pluggable
- * `StateBackend` — the per-instance counterpart of `kvState`. The storage
- * arrives on the Durable Object's constructor state rather than on `env`, so
- * it is passed straight as config (each instance has exactly one). Emitted
- * under `"state"`, so feature plugins reach it by declaring
- * `{ state: StateBackend }` in their input (identity wiring):
+ * Emit a Durable Object's own transactional storage as the plugin's item
+ * map, as-is. The storage arrives on the Durable Object's constructor state
+ * rather than on `env`, so it is passed straight as config (each instance
+ * has exactly one). Emitted under `"storage"`, so feature plugins reach it
+ * by declaring `{ storage: DurableObjectStorage }` in their input:
  *
  * ```ts
  * class Room extends DurableObject {
- *     boot() {
- *         return createKernel().bind(doState(), { option: { storage: this.ctx.storage } });
+ *     async boot() {
+ *         const scope = createScope();
+ *         return app.with(doStorage(), { option: { storage: this.ctx.storage } })
+ *             .apply({}, scope, undefined);
  *     }
  * }
  * ```
  *
- * Keys are namespaced `<plugin-namespace>:<key>`. Values are
- * structured-cloneable, so no JSON round trip is needed, and there is no
- * TTL — Durable Object storage has no expiry mechanism. State is scoped to
- * the instance: two names on one namespace never share a value.
+ * Values are structured-cloneable, so no JSON round trip is needed, and
+ * there is no TTL — Durable Object storage has no expiry mechanism. Storage
+ * is scoped to the instance: two names on one namespace never share a value.
  */
-export function doState(): Plugin<void, StateBackend, DoStorageConfig, "state"> {
+export function doStorage(): Plugin<void, DurableObjectStorage, DoStorageConfig, "storage"> {
     return definePlugin({
-        name: "state",
+        name: "storage",
         apply(_input, _scope, config) {
-            const backend: StateBackend = {
-                get: (ns, key) => config.storage.get(`${ns}:${key}`),
-                set: (ns, key, value) => config.storage.put(`${ns}:${key}`, value),
-                async delete(ns, key) {
-                    await config.storage.delete(`${ns}:${key}`);
-                },
-            };
-            return backend;
+            return config.storage;
         },
     });
 }
 
 /**
- * A server-side websocket hub: the exact shape of `WsConnection` in
+ * A server-side websocket hub: the same shape as `WsConnection` in
  * `@lambdot/websocket` (declared locally so the package keeps its single
- * `@lambdot/core` dependency), so the generic `wsInput`/`wsOutput` factories
- * consume it as-is through their `{ connection }` input. Where `wsTransport`
- * owns one client socket, the hub fans out over every socket a Durable
- * Object has accepted: `send` broadcasts, `onMessage` receives from any of
- * them.
+ * `@lambdot/core` dependency), so anything written against a connection
+ * consumes it as-is. Where `wsConnection` owns one client socket, the hub
+ * fans out over every socket a Durable Object has accepted: `push`
+ * broadcasts, `listen` receives from any of them.
  */
 export interface WebSocketHub {
     readonly url: string;
     /** Send a text frame to every accepted socket. */
-    send(data: string): void;
-    /** Subscribe to incoming text frames from any accepted socket. */
-    onMessage(listener: (data: string) => void): Disposer;
+    push(data: string): void;
+    /** Subscribe to incoming text frames from any accepted socket. The disposer unsubscribes. */
+    listen(listener: (data: string) => void): Disposer;
 }
 
 /**
@@ -99,7 +91,7 @@ export interface WebSocketHubControl extends WebSocketHub {
     accept(socket: WebSocket): void;
 }
 
-/** Config for a {@link wsHub} plugin: the URL the hub serves, reported as `WsConnection["url"]`. */
+/** Config for a {@link wsHub} plugin: the URL the hub serves, reported as `WebSocketHub["url"]`. */
 export interface WsHubConfig {
     readonly url: string;
 }
@@ -111,35 +103,28 @@ export interface WsHub<TCap extends string> {
 }
 
 /**
- * The server-side mirror of `wsTransport`: instead of dialing out, a Durable
- * Object accepts incoming sockets. `wsHub` returns the two halves of that —
- * the hub the Durable Object's fetch handler accepts `WebSocketPair` server
- * ends into, and the plugin that emits the hub as its namespace value, so
- * the generic `wsInput`/`wsOutput` halves (a `wsPlatform` bundle minus its
- * transport) drive it unchanged:
+ * The server-side mirror of `wsConnection`: instead of dialing out, a
+ * Durable Object accepts incoming sockets. `wsHub` returns the two halves
+ * of that — the hub the Durable Object's fetch handler accepts
+ * `WebSocketPair` server ends into, and the plugin that emits the hub as
+ * its item map:
  *
  * ```ts
  * class ChatRoom extends DurableObject {
  *     private readonly room = wsHub("room");
- *     private kernel: ReturnType<typeof createRoomKernel> | undefined;
+ *     private scope: OwnedScope | undefined;
  *
  *     async fetch(request: Request) {
- *         this.kernel ??= createRoomKernel(this.room, request.url);
- *         await this.kernel.start(); // `start` is idempotent
+ *         if (this.scope === undefined) {
+ *             this.scope = createScope();
+ *             await roomApp
+ *                 .with(this.room.plugin, { option: { url: request.url } })
+ *                 .apply({}, this.scope, undefined);
+ *         }
  *         const pair = new WebSocketPair();
  *         this.room.hub.accept(pair[1]);
  *         return new Response(null, { status: 101, webSocket: pair[0] });
  *     }
- * }
- *
- * function createRoomKernel(room: WsHub<"room">, url: string) {
- *     const chat = wsPlatform("dochat", chatSpec);
- *     return createKernel()
- *         .bind(room.plugin, { option: { url } })
- *         .use(chat.input, { mapping: (ctx) => ({ connection: ctx.room }) })
- *         .bind(chat.output, {
- *             mapping: (ctx) => ({ connection: ctx.room, commands: ctx.reply }),
- *         });
  * }
  * ```
  *
@@ -148,20 +133,20 @@ export interface WsHub<TCap extends string> {
  * the isolate's module scope, so module-level instances would cross-wire two
  * rooms (one room's broadcasts leaking into another's sockets). The
  * instance's URL is only known per request, so hold the hub in instance
- * state and boot the composition lazily in `fetch()` with `request.url`.
+ * state and apply the composition lazily in `fetch()` with `request.url`.
  */
 export function wsHub<const TCap extends string>(capability: TCap): WsHub<TCap> {
     const sockets = new Set<WebSocket>();
     const listeners = new Set<(data: string) => void>();
 
-    // `url` is only known once the plugin activates with its config, so the
+    // `url` is only known once the plugin applies with its config, so the
     // hub object stays mutable behind the readonly connection face.
     const hub = {
         url: "",
-        send(data: string) {
+        push(data: string) {
             for (const socket of sockets) socket.send(data);
         },
-        onMessage(listener: (data: string) => void): Disposer {
+        listen(listener: (data: string) => void): Disposer {
             listeners.add(listener);
             return () => {
                 listeners.delete(listener);

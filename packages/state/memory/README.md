@@ -1,84 +1,62 @@
 # @lambdot/state-memory
 
-The reference `StateBackend`: an in-memory store with optional per-key TTL,
-packaged as an ordinary plugin. lambdot's core is stateless — state is a
-plugin — and this is the simplest backend that fills the slot.
+The simplest state a composition can have: a plain `Map`, fresh per
+application, packaged as an ordinary plugin. lambdot's core is stateless —
+state is a plugin — and this is the zero-dependency instance of that.
 
 ## What it provides
 
-`memoryState()` emits its backend as the `"state"` namespace value, so
-stateful features declare `{ state: StateBackend }` in their input (identity
-wiring when the plugin is composed under its own name). The backend conforms
-to `StateBackend` from `@lambdot/core` (`get`/`set`/`delete`); feature
-plugins build a typed, namespaced view of it with
-`createStateAccessor(backend, name)` from `@lambdot/core`.
+`memoryState()` emits a `Map<string, unknown>` as the `"state"` namespace
+value, so stateful features declare `{ state: Map<string, unknown> }` in
+their input (identity wiring when the plugin is composed under its own
+name) and read/write the map directly — no backend contract, no accessor
+factory. Features that outgrow a `Map` swap in a host-native store (a
+`DatabaseSync`, a KV namespace) by changing the provider plugin and the
+declared input type.
 
-Semantics and limitations:
-
-- **Per-activation, non-persistent.** The store is a `Map` created in
-  `apply()`, so each kernel activation starts from an empty store: two
-  kernels built from the same `memoryState()` value do not see each
-  other's writes, and state is gone when the composition stops.
-- **Lazy TTL.** `set(namespace, key, value, ttlMs)` records an absolute
-  expiry; an expired key is evicted on read (`get` deletes it and returns
-  `undefined`). There is no background sweeper.
+Semantics: the store is created in `apply()`, so each application starts
+from an empty map — two applications of the same definition do not see each
+other's writes, and state is gone when the owning scope disposes.
 
 ## Usage
 
 ```ts
-import { consolePlatform, type ConsoleLine } from "@lambdot/console";
-import type { StateBackend, Stream } from "@lambdot/core";
-import { createKernel, createStateAccessor, definePlugin, mapStream } from "@lambdot/core";
+import { definePlugin } from "@lambdot/core";
 import { memoryState } from "@lambdot/state-memory";
-
-interface CounterSchema {
-    count: number;
-}
 
 const counter = definePlugin({
     name: "counter",
-    apply(input: { "console/lines": Stream<ConsoleLine>; state: StateBackend }) {
-        const state = createStateAccessor<CounterSchema>(input.state, "counter");
-        return mapStream(input["console/lines"], async (event) => {
-            const count = ((await state.get("count")) ?? 0) + 1;
-            await state.set("count", count);
-            return { address: event.address, content: `#${count}: ${event.payload}` };
-        });
+    apply(input: { state: Map<string, unknown> }) {
+        const count = ((input.state.get("count") as number | undefined) ?? 0) + 1;
+        input.state.set("count", count);
+        return { count };
     },
 });
 
-const cli = consolePlatform();
-
-const kernel = createKernel()
-    .use(cli.lines)
-    .use(memoryState())
+const app = definePlugin({ name: "app", apply: () => ({}) })
+    .with(memoryState())
     // identity wiring: counter's inputs match the visible ctx
-    .use(counter)
-    .bind(cli.printer, { mapping: (ctx) => ({ replies: ctx.counter }) });
+    .use(counter);
 ```
 
 Wire `memoryState()` before the feature: a consumer wired before its
 provider is a compile error, because the declared input keys must be visible
-in the composition's context. Swap `memoryState()` for another backend
-plugin (one emitting a `StateBackend` under `"state"`) and the feature
-doesn't change.
+in the composition's context.
 
 ## API
 
 ```ts
-function memoryState(): Plugin<void, StateBackend, void, "state">;
+function memoryState(): Plugin<void, Map<string, unknown>, void, "state">;
 ```
 
 The only export. Takes no config; the returned plugin is named `"state"`.
 
 ## See also
 
-- [`examples/counter-bot`](../../../examples/counter-bot) — the
-  pluggable-state walkthrough this backend serves.
 - [`@lambdot/state-sqlite`](../sqlite) — a `node:sqlite` connection as a
-  namespace value (not a `StateBackend`).
-- `@lambdot/host-cloudflare` — `kvState`, bridging a Workers KV namespace
-  into the same `StateBackend` shape.
+  namespace value, for state that should outlive an application.
+- `@lambdot/host-cloudflare` — `kvNamespace` and `doStorage`, the
+  host-native storage bindings of a worker.
 
 ## License
 

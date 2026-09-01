@@ -1,0 +1,24 @@
+{
+    "name": "@lambdot/host-hono",
+    "version": "0.2.0",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/Embers-of-the-Fire/lambdot",
+        "directory": "packages/host/hono"
+    },
+    "type": "module",
+    "exports": {
+        ".": "./src/index.ts"
+    },
+    "publishConfig": {
+        "access": "public"
+    },
+    "scripts": {
+        "test": "node --test"
+    },
+    "dependencies": {
+        "@lambdot/core": "workspace:*",
+        "@lambdot/http": "workspace:*",
+        "hono": "^4.13.5"
+    }
+}

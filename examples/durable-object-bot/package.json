@@ -9,7 +9,6 @@
     "dependencies": {
         "@lambdot/core": "workspace:*",
         "@lambdot/host-cloudflare": "workspace:*",
-        "@lambdot/websocket": "workspace:*",
         "esbuild": "^0.28.2",
         "miniflare": "^4"
     }

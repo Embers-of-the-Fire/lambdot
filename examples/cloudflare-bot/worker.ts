@@ -1,7 +1,7 @@
-import type { StateBackend } from "@lambdot/core";
-import { createKernel, createStateAccessor, definePlugin } from "@lambdot/core";
+import type { OwnedScope } from "@lambdot/core";
+import { createScope, definePlugin } from "@lambdot/core";
 import type { KVNamespace } from "@lambdot/host-cloudflare";
-import { envVars, kvNamespace, kvState } from "@lambdot/host-cloudflare";
+import { envVars, kvNamespace } from "@lambdot/host-cloudflare";
 import { Hono } from "hono";
 
 /**
@@ -23,35 +23,32 @@ export interface PingReply {
 }
 
 /**
- * The request/response bridge, emitted as the plugin's namespace value: the
- * hono handler lives outside the composition, so it drives the round trip
- * through `kernel.ctx["ping-pong"]` — typed by the composition, no casts.
+ * The request/response service, emitted as the feature's item map: the hono
+ * handler lives outside the composition, so it drives the round trip
+ * through the item map the application returned — typed, no casts.
  */
 export interface PingService {
     handle(message: string): Promise<PingReply>;
 }
 
-interface PingPongSchema {
-    count: number;
-}
-
 /**
- * The ping-pong feature. Each ping increments a counter in plugin state
- * (served from the KV namespace via `kvState`) and replies. No event
- * indirection: HTTP is request/response, so `handle` does the work inline.
+ * The ping-pong feature. Each ping increments a counter in the KV namespace
+ * — declared directly as the feature's input; there is no framework state
+ * contract — and replies. No event indirection: HTTP is request/response,
+ * so `handle` does the work inline.
  */
 const pingPong = definePlugin({
     name: "ping-pong",
-    apply(input: { state: StateBackend }) {
-        const state = createStateAccessor<PingPongSchema>(input.state, "ping-pong");
+    apply(input: { pings: KVNamespace }) {
         const service: PingService = {
             async handle(message) {
                 // Illustrative read-modify-write: concurrent pings served by
                 // separate isolates can race and lose an increment, because
                 // KV offers no atomic increment. For atomic semantics use a
-                // Durable Object (`doState` from @lambdot/host-cloudflare).
-                const count = ((await state.get("count")) ?? 0) + 1;
-                await state.set("count", count);
+                // Durable Object (`doStorage` from @lambdot/host-cloudflare).
+                const stored = await input.pings.get("ping-pong:count", { type: "json" });
+                const count = (typeof stored === "number" ? stored : 0) + 1;
+                await input.pings.put("ping-pong:count", JSON.stringify(count));
                 return { reply: `pong: ${message}`, count };
             },
         };
@@ -59,30 +56,48 @@ const pingPong = definePlugin({
     },
 });
 
+/** What the worker needs back from the application. */
+interface BotItems {
+    readonly defaultMessage: string;
+    readonly handle: PingService["handle"];
+}
+
 function createBot(env: Env) {
     return (
-        createKernel()
-            .use(envVars("bot-env", ["PING_DEFAULT_MESSAGE"]), { option: { source: env } })
-            .bind(kvNamespace("pings"), { option: { binding: env.PINGS } })
-            .bind(kvState("state"), { mapping: (ctx) => ({ kv: ctx.pings }) })
-            // identity wiring: the bound "state" namespace feeds ping-pong
+        definePlugin({
+            name: "app",
+            apply: (ctx: {
+                "bot-env": Readonly<Record<"PING_DEFAULT_MESSAGE", string>>;
+                "ping-pong": PingService;
+            }): BotItems => ({
+                defaultMessage: ctx["bot-env"].PING_DEFAULT_MESSAGE,
+                handle: (message) => ctx["ping-pong"].handle(message),
+            }),
+        })
+            .with(envVars("bot-env", ["PING_DEFAULT_MESSAGE"]), { option: { source: env } })
+            .with(kvNamespace("pings"), { option: { binding: env.PINGS } })
+            // identity wiring: the "pings" namespace feeds ping-pong
             .use(pingPong)
     );
 }
 
-// Workers hand bindings out per request; boot the composition once per
-// isolate and reuse it after that (`start` is idempotent).
-let bot: ReturnType<typeof createBot> | undefined;
+// Workers hand bindings out per request; the composition is applied once
+// per isolate and reused after that. The scope lives as long as the
+// isolate — there is nothing to stop, only resources held open.
+let bot: { items: BotItems; scope: OwnedScope } | undefined;
 
 const app = new Hono<{ Bindings: Env }>();
 
 app.post("/ping", async (c) => {
-    bot ??= createBot(c.env);
-    await bot.start();
+    if (bot === undefined) {
+        const scope = createScope();
+        const items = await createBot(c.env).apply({}, scope, undefined);
+        bot = { items, scope };
+    }
 
     // No message in the request body? Fall back to the worker's configured
-    // var, read from the env namespace.
-    let message = bot.ctx["bot-env"].PING_DEFAULT_MESSAGE;
+    // var, re-exported on the application's item map.
+    let message = bot.items.defaultMessage;
     try {
         const body: unknown = await c.req.json();
         if (
@@ -96,7 +111,7 @@ app.post("/ping", async (c) => {
         // Not JSON (or no body): ping with the default message.
     }
 
-    return c.json(await bot.ctx["ping-pong"].handle(message));
+    return c.json(await bot.items.handle(message));
 });
 
 export default app;

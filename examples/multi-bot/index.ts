@@ -1,49 +1,44 @@
-import type { Stream } from "@lambdot/core";
-import { createKernel, definePlugin, pumpStream } from "@lambdot/core";
+import { createScope, definePlugin } from "@lambdot/core";
 
-import { type BridgePort, createEchoBot, type WsEchoMessage } from "./bot.ts";
+import { type BridgePort, createEchoBot, type EchoBotSurface } from "./bot.ts";
 import { startEchoServer } from "./server.ts";
 
 const serverA = await startEchoServer(8080);
 const serverB = await startEchoServer(8081);
 
 /**
- * The supervisor's cross-kernel policy, expressed as an ordinary plugin:
- * forward "@all " traffic from one bot's message stream into the other's
- * bridge port. Its declared input is the narrow contract; the wiring
- * mapping is typed against the engines' exposed surfaces — no casts, no
- * string rewriting, and anything the engines don't expose is unnameable.
+ * The supervisor's cross-bot policy, expressed as an ordinary plugin:
+ * forward "@all " traffic from one bot's surface into the other's bridge
+ * port. Its declared input is the narrow contract; the wiring mapping is
+ * typed against the nested item maps — no casts, and anything the bots
+ * don't expose is unnameable.
  */
 const bridgeAll = definePlugin({
     name: "bridge/all",
-    apply(input: { source: Stream<WsEchoMessage>; target: BridgePort }, scope) {
+    apply(input: { source: EchoBotSurface; target: BridgePort }, scope) {
         scope.onDispose(
-            pumpStream(
-                input.source,
-                (event) => {
-                    if (event.payload.startsWith("@all ")) {
-                        input.target.push(event.payload.slice("@all ".length));
-                    }
-                },
-                (error) => scope.onError(error),
-            ),
+            input.source.listen((text) => {
+                if (text.startsWith("@all ")) {
+                    input.target.push(text.slice("@all ".length));
+                }
+            }),
         );
     },
 });
 
-// The supervisor is itself a kernel. Each bot is an engine nested under
-// its exposed name; the bridge is bound (it emits no namespace). Startup
-// and teardown order fall out of composition order: engines activate
-// first, the bridge pump last — and on stop the pump detaches before the
-// engines tear down.
-const supervisor = createKernel()
-    .use(createEchoBot("botA", `ws://127.0.0.1:${serverA.port}`))
-    .use(createEchoBot("botB", `ws://127.0.0.1:${serverB.port}`))
-    .bind(bridgeAll, {
-        mapping: (ctx) => ({ source: ctx.botA.wsecho, target: ctx.botB.bridge }),
+// The supervisor is itself a plugin. Each bot is a hermetic (`with`)
+// dependency: granted a blank context, it shares nothing with its sibling —
+// isolation falls out of composition. The bridge reads both nested item
+// maps through its mapping.
+const supervisor = definePlugin({ name: "supervisor", apply: () => ({}) })
+    .with(createEchoBot("botA", `ws://127.0.0.1:${serverA.port}`))
+    .with(createEchoBot("botB", `ws://127.0.0.1:${serverB.port}`))
+    .use(bridgeAll, {
+        mapping: (ctx) => ({ source: ctx.botA, target: ctx.botB.bridge }),
     });
 
-await supervisor.start();
+const scope = createScope({ onError: (error) => console.error("[supervisor]", error) });
+await supervisor.apply({}, scope, undefined);
 
 // Drive both bots and record every frame each driver receives.
 function drive(url: string) {
@@ -93,7 +88,7 @@ await new Promise((resolve) => setTimeout(resolve, 200));
 
 driverA.close();
 driverB.close();
-await supervisor.stop();
+await scope.dispose();
 await serverA.close();
 await serverB.close();
 
@@ -104,8 +99,8 @@ if (
     driverB.messages.join("|") !== expectedB.join("|")
 ) {
     console.error(
-        `multi-kernel-bot: FAIL — A got ${JSON.stringify(driverA.messages)}, B got ${JSON.stringify(driverB.messages)}`,
+        `multi-bot: FAIL — A got ${JSON.stringify(driverA.messages)}, B got ${JSON.stringify(driverB.messages)}`,
     );
     process.exit(1);
 }
-console.log("multi-kernel-bot: OK — isolated dispatch, typed engine bridge");
+console.log("multi-bot: OK — nested compositions, explicit bridge");

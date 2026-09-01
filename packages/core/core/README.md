@@ -1,144 +1,219 @@
 # @lambdot/core
 
-The lambdot kernel: a stateless, serverless, non-context-aware composition
-runtime for chatbots. It owns no conversational data and no platform
-semantics — inputs, outputs, state backends, and features are all plugins,
-composed through TypeScript's type system. A plugin is a function:
-`apply(input, scope, config)` maps a declared input record to an output
-value. Every `use(...)`/`bind(...)` wires the next plugin's input with a
-`mapping` from the namespaces visible so far, so wiring a plugin before its
-dependencies is a compile error. Published on npm as `@lambdot/core`.
+A composition model for dataflow dependencies, in the same spirit that Nix
+is a definition model for systems: **a system is described by an immutable,
+stateless definition, and the description itself is composable.**
 
-## Concepts
+The model recognizes exactly one concept — the **plugin** — and exactly one
+mechanism — **context injection**, available in two forms, `use` and
+`with`. There is no kernel, engine, composite, or system object. Composing
+two plugins yields a plugin; the dependency tree of an application _is_ a
+plugin.
 
-- **A plugin is a function.** `apply(input, scope, config)` receives exactly
-  the input record it declares and returns the output value it emits. There
-  are no plugin roles and no lifecycle hooks: `scope.onDispose(d)` collects
-  teardown (run in reverse on `stop()`), `scope.onError(e)` sinks background
-  errors. Config is validated through any Standard Schema validator
-  (`Config`), with failures surfacing as `ConfigValidationError`.
-- **Composition is function application.** `use(plugin, { mapping, option,
-as })` feeds a plugin from the namespaces visible so far and exposes its
-  output on the final `ctx` under its name. `bind(...)` feeds it the same
-  way but keeps the output internal to the chain — visible to later
-  `mapping`s, absent from `ctx`. `mapping` is omitted when the plugin's
-  input keys already match visible namespaces (identity wiring); `option`
-  carries config, required exactly when the config type is non-void; `as`
-  renames the namespace.
-- **Streams are the message-flow primitive.** `Stream<T>` is an
-  `AsyncIterable` with broadcast semantics — every consumer sees every item,
-  in order, at its own pace. Inputs push from callbacks through `channel()`
-  and emit a `shareStream` view; features transform with
-  `mapStream`/`filterStream`/`mergeStreams`; outputs consume command streams
-  with `pumpStream`. A feature handling two platforms merges their streams;
-  a command stream serving two platforms is filtered per output by
-  `address.platform` in the wiring `mapping`.
-- **The envelope is free of platform semantics.** `Message` is `payload` +
-  `address` (+ `id`/`at`, minted by `message()`); `Command` is `address` +
-  `content`. `address` is opaque to the core and meaningful only to the
-  platform that produced it.
-- **Platform-specific services are ordinary namespace values.** A REST
-  client, a webhook handler, a database connection — anything a plugin emits
-  lands on `ctx` (or stays internal via `bind`) with its type intact.
-- **State is a plugin.** The core is stateless; a state plugin emits a
-  `StateBackend` as its namespace value, and a stateful feature declares the
-  backend in its input and builds a typed accessor namespaced to its own
-  name via `createStateAccessor(backend, name)`.
-- **Activation order is definition order.** `start()` activates in
-  composition order — resolve mapping, validate config, `apply` — and
-  `stop()` disposes in reverse. Ordering mistakes are compile errors in the
-  mappings, not runtime states.
-- **`expose(name)` seals a chain into a final engine.** The engine is the
-  chain as an artifact: named, runnable (`start`/`stop`/`ctx`), and wireable
-  into a supervisor kernel under its new name — but no longer composable
-  (`use`/`bind` are gone from the type and throw at runtime). Its type is
-  exactly `Engine<TIn, TVisible, TName>`: the chain's external input
-  requirement survives, while the `bind`-encapsulated internals and the
-  chain's own name are erased. This is how N instances of one bot stack nest
-  into a supervisor without name tags or leaked internals.
+## Plugin
 
-## Usage
+A plugin is a processor of a given context: it reads a **context** (a
+record from string keys — namespaces — to arbitrary values) and produces an
+**item map** (an arbitrary map). It is a **definition, not a process**:
+immutable, stateless, composable.
 
 ```ts
-import { consolePlatform, type ConsoleLine } from "@lambdot/console";
-import type { Stream } from "@lambdot/core";
-import { createKernel, definePlugin, mapStream } from "@lambdot/core";
+import { definePlugin } from "@lambdot/core";
 
-const echo = definePlugin({
-    name: "echo",
-    apply(input: { "console/lines": Stream<ConsoleLine> }) {
-        return mapStream(input["console/lines"], (event) => ({
-            address: event.address,
-            content: `echo: ${event.payload}`,
-        }));
-    },
+const greet = definePlugin({
+    name: "greet",
+    apply: () => ({ greeting: "hello" }),
 });
-
-const cli = consolePlatform();
-
-const kernel = createKernel()
-    .use(cli.lines) // exposes ctx["console/lines"]: Stream<ConsoleLine>
-    .use(echo) // identity wiring: the input keys already match
-    .bind(cli.printer, { mapping: (ctx) => ({ replies: ctx.echo }) });
-
-await kernel.start();
-process.on("SIGINT", () => void kernel.stop().then(() => process.exit(0)));
 ```
 
-`use(cli.lines)` exposes the line stream under `"console/lines"`. `use(echo)`
-needs no `mapping`: its declared input `{ "console/lines": ... }` is already
-satisfied by the visible ctx. The printer declares `{ replies: ... }`, which
-no namespace provides — so the `mapping` is required, and its `ctx`
-parameter is typed as exactly what's visible so far; referencing a
-not-yet-composed namespace is a compile error. The printer is `bind`ed, so
-`ctx["console/printer"]` does not typecheck.
+Call `definePlugin` without explicit type arguments: the name infers as a
+literal (it becomes the default namespace once composed), and the input,
+output, and config types infer from `apply`'s annotations and the `Config`
+schema.
 
-## API overview
+A plugin's declared input is its **full context view**: what the caller
+seeds plus the namespaces of the dependencies it composes. A plugin whose
+logic reads `ctx.inner.greeting` declares `{ inner: { greeting: string } }`
+— whether `inner` comes from the caller or from `.use(inner)`.
 
-Runtime values:
+A plugin may declare a **config schema** (any
+[Standard Schema](https://standardschema.dev) validator). Every use site
+that declares the plugin as a dependency must then supply a config value,
+validated against the schema before the plugin's logic runs:
 
-| Export                               | What it is                                                               |
-| ------------------------------------ | ------------------------------------------------------------------------ |
-| `createKernel(options?)`             | Creates an empty composition; `options.onError` sinks background errors. |
-| `definePlugin(spec)`                 | Authors a plugin from `{ name, Config?, apply }`.                        |
-| `message(payload, address)`          | Mints a `Message` envelope with a fresh `id`/`at`.                       |
-| `channel()`                          | Push-side bridge from callbacks into the pull world.                     |
-| `shareStream(stream)`                | Multicasts a stream to any number of consumers.                          |
-| `mapStream`                          | Per-item transform (async mapper allowed; items stay sequential).        |
-| `filterStream`                       | Per-item filter; the type-guard form narrows the item type.              |
-| `mergeStreams`                       | Interleaves several streams in arrival order.                            |
-| `pumpStream`                         | Background sequential consumer; errors go to `onError`.                  |
-| `createStateAccessor(backend, name)` | Typed, namespaced view over a `StateBackend`.                            |
-| `ConfigValidationError`              | Thrown when a plugin's `Config` schema rejects its config.               |
+```ts
+const greet = definePlugin({
+    name: "greet",
+    Config: schema, // StandardSchemaV1<unknown, { loud: boolean }>
+    apply: (_ctx, _scope, config) => ({ greeting: config.loud ? "HELLO" : "hello" }),
+});
+```
 
-Types, grouped by theme:
+## Composition: `use` and `with`
 
-- **Messages** — `Message` (the inbound envelope: `payload`, `address`,
-  `id`, `at`), `Command` (the outbound pair: `address`, `content`),
-  `Address` (the `platform` routing tag).
-- **Streams** — `Stream`, `Channel`.
-- **Plugins** — `Plugin` (name, `Config`, `apply`, plus the composition
-  methods), `PluginSpec` (the author-facing half), `Scope` (`onDispose` /
-  `onError`), `Composite` (a composed chain — itself wireable), `Engine`
-  (a chain sealed by `expose`: final, named, internals erased), `AnyUnit`.
-- **The composition types** — `InOf`, `OutOf`, `ConfigOf`, `NameOf`,
-  `WireArgs` (the `use`/`bind` options: `mapping` required when identity
-  wiring fails, `option` required when config is non-void, `as` to rename),
-  `StartArgs`, `Kernel` (a `Composite` seeded empty).
-- **Config** — `StandardSchemaV1` (structural copy of the Standard Schema v1
-  interface; zod, valibot, arktype, … plug in with no runtime dependency).
-- **State** — `StateBackend` (`get`/`set`/`delete` over namespace + key,
-  optional `ttlMs`), `StateAccessor`.
-- **Lifecycle** — `Disposer`.
-- **Kernel options** — `KernelOptions`.
+Context injection is the only composition mechanism. Both forms declare
+that **A depends on B**, and both inject B's item map into the context A
+will process, under a namespace. They differ in exactly one thing: the
+context B itself processes.
 
-## Examples
+```ts
+A.use(B); // B is granted the context A already has
+A.with(B); // B is granted a blank context
+```
 
-The worked walkthroughs live in the repository's `examples/` directory:
-`echo-bot` (the minimal bot above, plus compile-time composition tests in
-`type-test.ts`), `counter-bot` (the pluggable-state walkthrough), and
-`websocket-bot` (the transport-wiring walkthrough).
+- **`use`** — B is a _contextual_ dependency. B is applied to the context
+  accumulated so far: A's given context, enriched with the item maps of all
+  dependencies declared before B. Declaration order is observable.
+- **`with`** — B is a _hermetic_ dependency. B is applied to an empty
+  context: its item map depends only on its own subtree and its config.
+  Declaration order is irrelevant.
 
-## License
+Composition is non-destructive: both forms return a new plugin and leave
+`A` unchanged and reusable.
 
-Dual-licensed under [Apache-2.0](../../../LICENSE-APACHE) and [MIT](../../../LICENSE-MIT).
+```ts
+const state = definePlugin({ name: "state", apply: () => ({ get, set }) });
+const counter = definePlugin({
+    name: "counter",
+    apply: (ctx: { "counter-source": { get(): number; set(n: number): void } }) => ({
+        increment: () => {
+            /* ... */
+        },
+        value: () => ctx["counter-source"].get(),
+    }),
+});
+
+const app = definePlugin({
+    name: "app",
+    apply: (ctx: { counter: { value(): number } }) => ({ run: () => ctx.counter.value() }),
+})
+    .with(state)
+    .use(counter, { mapping: (ctx) => ({ "counter-source": ctx.state }) });
+```
+
+At each composition site, the wiring parameterizes the dependency — a
+plugin never knows how it is wired:
+
+- `mapping` (`use` only) — derives the dependency's input context from the
+  accumulated context. Required (statically) when identity wiring cannot
+  satisfy the dependency's declared input. `with` has no mapping: the
+  granted context is always blank, so there is nothing to adapt.
+- `option` (both forms) — the dependency's config value, validated against
+  its declared config schema.
+- `as` (both forms) — overrides the namespace (default: the dependency's
+  name).
+
+Applying a composed plugin seeds the accumulated context from the given
+context, applies each dependency in declaration order, injecting each item
+map under its namespace, then runs the plugin's **own logic last**, over
+the final accumulated context, and returns **its own item map**. A plugin's
+own item map never enters its own context — it is visible only to its
+caller. The accumulated context is input-side scaffolding; it does not
+propagate to the caller.
+
+Because a composed plugin is a plugin, nesting is uniform: used as a
+dependency, its whole item map nests under one namespace of the parent's
+context, so contexts are tree-shaped exactly as the declaration is. Within
+one plugin's dependency list a namespace may be introduced at most once —
+duplicates are rejected statically where the type system can see them, and
+as a thrown error at application time otherwise.
+
+## Diagnostics: abstract plugins and handlers
+
+Logging and tracing are expressed with the abstract/handler pattern — a
+plugin declares an **optional sink** in its input contract and emits
+through it only when one is present. Absence means drop: no buffering, no
+fallback, no default handler.
+
+```ts
+const logToConsole = definePlugin({
+    name: "logToConsole",
+    apply: () => ({ write: (rec) => console.log(rec) }),
+});
+const foo = definePlugin({
+    name: "foo",
+    apply: (ctx: { sink?: { write(rec: unknown): void } }) => ({
+        work: () => ctx.sink?.write({ level: "info", msg: "working" }),
+    }),
+});
+
+// downstream decides to handle:
+app.with(logToConsole).use(foo, { mapping: (ctx) => ({ sink: ctx.logToConsole }) });
+// or not — foo's logs are dropped:
+app.use(foo);
+```
+
+An optional declared input never forces a mapping — identity wiring remains
+valid. Diagnostics do not propagate implicitly: if `foo` is nested inside
+`bar`, `bar` must re-declare the optional sink and forward it through its
+own mapping. The handler is swappable (console, file, test recorder)
+without touching `foo` or any intermediate layer's logic.
+
+## Application and scope
+
+Execution is _application_; there is no running instance, no start, no
+stop. The caller that originates an application provides the initial
+context (empty or seeded) and owns a **scope**, deciding when to dispose
+it:
+
+```ts
+import { createScope } from "@lambdot/core";
+
+const scope = createScope({ onError: (error) => console.error(error) });
+const items = await app.apply({ env: "prod" }, scope, undefined);
+// ... later, when the application's resources should be released:
+await scope.dispose();
+```
+
+At application time a plugin receives the scope and may:
+
+- register **disposers** — teardown actions for the resources this
+  application acquired. They run in reverse registration order (LIFO) when
+  the owning scope is disposed, unwinding the dependency tree in reverse
+  dependency order: the plugin's own logic first, then its dependencies in
+  reverse.
+- report **errors** — failures that occur outside the direct application
+  call (background tasks, subscriptions, disposer failures). The framework
+  installs no error policy; an unhandled report falls through to the
+  caller's sink.
+
+If any part of an application fails — validation error, thrown exception,
+rejected promise — the application aborts: every dependency already applied
+is disposed in reverse order, and the failure propagates to the caller. A
+failed application leaves no partial resources behind.
+
+## API
+
+| Export                                                    | Kind     | Purpose                                                              |
+| --------------------------------------------------------- | -------- | -------------------------------------------------------------------- |
+| `definePlugin(spec)`                                      | function | Author a plugin (`name`, optional `Config`, `apply`).                |
+| `plugin.use(dep, options?)`                               | method   | Declare a contextual dependency; returns a new plugin.               |
+| `plugin.with(dep, options?)`                              | method   | Declare a hermetic dependency (blank context); returns a new plugin. |
+| `plugin.apply(ctx, scope, config)`                        | method   | Apply the definition to a context under a caller-owned scope.        |
+| `createScope(options?)`                                   | function | Create an owned scope; `dispose()` unwinds it LIFO.                  |
+| `ConfigValidationError`                                   | class    | Thrown when a config value fails schema validation.                  |
+| `Plugin`, `PluginSpec`, `Scope`, `OwnedScope`, `Disposer` | types    | The model's vocabulary.                                              |
+| `InOf`, `OutOf`, `ConfigOf`, `NameOf`                     | types    | Structural inference helpers.                                        |
+| `WireArgs`, `WithArgs`, `AnyPlugin`                       | types    | Wiring helper types.                                                 |
+| `StandardSchemaV1`                                        | type     | Structural copy of the Standard Schema interface.                    |
+
+## Design principles
+
+- **One concept, one mechanism.** Anything that can be defined can be
+  composed; anything composed can be further composed. The dependency tree
+  is fractal.
+- **Definitions, not instances.** Each application is isolated and
+  disposable; the caller decides how to execute and when to dispose.
+- **Context flows top-down only.** A plugin sees exactly what its caller
+  gave it, enriched solely by its declared dependencies. No ambient state,
+  no registry, no upward or sideways flow.
+- **Composition is explicit at the use site.** Dependencies, namespaces,
+  input adaptation, and config are all declared where a dependency is used.
+  `use` shares the world; `with` seals it.
+- **Concerns are plugins.** Logging, error routing, state backends,
+  transports, behavior behind abstract interfaces — ordinary plugins; the
+  core reserves no hooks for them.
+- **Static where possible, dynamic where necessary.** Context shapes,
+  wiring validity, mapping and config requirements, and namespace freshness
+  are enforced by the type system, and again at application time so
+  dynamically-constructed compositions fail loudly.

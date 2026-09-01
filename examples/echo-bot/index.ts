@@ -1,27 +1,21 @@
-import { consolePlatform, type ConsoleLine } from "@lambdot/console";
-import type { Stream } from "@lambdot/core";
-import { createKernel, definePlugin, mapStream } from "@lambdot/core";
+import { consoleIo, type ConsoleIo } from "@lambdot/console";
+import { createScope, definePlugin } from "@lambdot/core";
 
 const echo = definePlugin({
     name: "echo",
-    apply(input: { "console/lines": Stream<ConsoleLine> }) {
-        return mapStream(input["console/lines"], (event) => ({
-            address: event.address,
-            content: `echo: ${event.payload}`,
-        }));
+    apply(input: { console: ConsoleIo }, scope) {
+        scope.onDispose(input.console.onLine((line) => input.console.print(`echo: ${line}`)));
     },
 });
 
-const cli = consolePlatform();
-
-const kernel = createKernel()
-    .use(cli.lines)
+const app = definePlugin({ name: "app", apply: () => ({}) })
+    .with(consoleIo(), { option: {} })
     // identity wiring: echo's input keys already match the visible ctx
-    .use(echo)
-    .bind(cli.printer, { mapping: (ctx) => ({ replies: ctx.echo }) });
+    .use(echo);
 
-await kernel.start();
+const scope = createScope();
+await app.apply({}, scope, undefined);
 
 process.on("SIGINT", () => {
-    void kernel.stop().then(() => process.exit(0));
+    void scope.dispose().then(() => process.exit(0));
 });

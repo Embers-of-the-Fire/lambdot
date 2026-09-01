@@ -1,43 +1,68 @@
-import type { Address, Command, Message, Plugin, Stream } from "@lambdot/core";
-import { channel, definePlugin, message, pumpStream, shareStream } from "@lambdot/core";
+import type { Disposer, Plugin } from "@lambdot/core";
+import { definePlugin } from "@lambdot/core";
 
 /**
- * The shared transport service, emitted as a plugin's output value. Owns the
- * socket; platform plugins consume it through their input — the transport
- * itself knows nothing about platforms, addresses, or message shapes.
+ * The socket, re-exported to the context: the plugin owns the connection
+ * lifecycle and emits the live connection as its item map, so consumers
+ * listen to incoming text frames and push outgoing ones. The transport
+ * knows nothing about protocols or message shapes.
  */
 export interface WsConnection {
     readonly url: string;
     /** Send a text frame. */
-    send(data: string): void;
-    /** Subscribe to incoming text frames. The listener remains active for the connection lifetime. */
-    onMessage(listener: (data: string) => void): void;
+    push(data: string): void;
+    /** Subscribe to incoming text frames (binary frames are dropped). The disposer unsubscribes. */
+    listen(listener: (data: string) => void): Disposer;
 }
 
-export interface WsTransportConfig {
+/** Config for {@link wsConnection}: where to dial, and how. */
+export interface WsConnectionConfig {
     readonly url: string;
+    /**
+     * Socket factory; defaults to the global `WebSocket`. Inject a fake in
+     * tests or a platform-specific implementation on hosts without one.
+     */
+    readonly create?: (url: string) => WebSocketLike;
+}
+
+/** The structural slice of the web-standard `WebSocket` the plugin drives. */
+export interface WebSocketLike {
+    addEventListener(type: string, listener: (event: { data: unknown }) => void): void;
+    removeEventListener(type: string, listener: (event: { data: unknown }) => void): void;
+    send(data: string): void;
+    close(): void;
 }
 
 /**
- * The general half: connection lifecycle only. Emits the live connection as
- * its output value; platform plugins declare it as their input. The socket
- * opens at activation and closes when the composition stops.
+ * One websocket connection as an ordinary plugin: the socket opens at
+ * application (a connect failure fails the application) and closes when the
+ * owning scope disposes. Instances multiply by name — compose
+ * `wsConnection("a")` and `wsConnection("b")` side by side, each consumer
+ * wiring its own through its mapping.
+ *
+ * ```ts
+ * const feature = definePlugin({
+ *     name: "feature",
+ *     apply(input: { socket: WsConnection }, scope) {
+ *         scope.onDispose(input.socket.listen((data) => input.socket.push(data)));
+ *     },
+ * });
+ *
+ * app.with(wsConnection("socket"), { option: { url } }).use(feature);
+ * ```
  */
-export function wsTransport<const TName extends string>(
+export function wsConnection<const TName extends string>(
     name: TName,
-): Plugin<void, WsConnection, WsTransportConfig, TName> {
+): Plugin<void, WsConnection, WsConnectionConfig, TName> {
     return definePlugin({
         name,
         async apply(_input, scope, config) {
-            const socket = new WebSocket(config.url);
+            const create = config.create ?? ((url: string) => new WebSocket(url));
+            const socket = create(config.url);
             await new Promise<void>((resolve, reject) => {
-                socket.addEventListener("open", () => resolve(), { once: true });
-                socket.addEventListener(
-                    "error",
-                    () => reject(new Error("websocket failed to connect")),
-                    {
-                        once: true,
-                    },
+                socket.addEventListener("open", () => resolve());
+                socket.addEventListener("error", () =>
+                    reject(new Error(`websocket failed to connect: ${config.url}`)),
                 );
             });
             scope.onDispose(() => {
@@ -46,155 +71,19 @@ export function wsTransport<const TName extends string>(
 
             return {
                 url: config.url,
-                send: (data) => socket.send(data),
-                onMessage(listener) {
-                    socket.addEventListener("message", (event) => {
+                push: (data) => {
+                    socket.send(data);
+                },
+                listen(listener) {
+                    const onMessage = (event: { data: unknown }) => {
                         if (typeof event.data === "string") listener(event.data);
-                    });
+                    };
+                    socket.addEventListener("message", onMessage);
+                    return () => {
+                        socket.removeEventListener("message", onMessage);
+                    };
                 },
             };
         },
     });
-}
-
-/**
- * The deferred behavior slot: everything the generic transport cannot know —
- * the platform tag, the address shape, and the frame codec. A concrete
- * platform (discord, qq, ...) supplies one of these to the factories below.
- */
-export interface WsSpec<
-    TPlatform extends string,
-    TAddress extends Address<TPlatform>,
-    TPayload,
-    TContent,
-> {
-    readonly platform: TPlatform;
-    /** Decode an incoming frame into a message, or null to ignore the frame. */
-    decode(data: string): { payload: TPayload; address: TAddress } | null;
-    /** Encode outgoing content into a text frame. */
-    encode(content: TContent, address: TAddress): string;
-}
-
-/**
- * The input half of a websocket platform: consumes the connection and emits
- * the stream of decoded messages. Wire the connection with a mapping from
- * the transport's namespace.
- */
-export function wsInput<
-    const TName extends string,
-    TPlatform extends string,
-    TAddress extends Address<TPlatform>,
-    TPayload,
-    TContent,
->(
-    name: TName,
-    spec: WsSpec<TPlatform, TAddress, TPayload, TContent>,
-): Plugin<{ connection: WsConnection }, Stream<Message<TPayload, TAddress>>, void, TName> {
-    return definePlugin({
-        name,
-        apply(input, scope) {
-            const messages = channel<Message<TPayload, TAddress>>();
-            input.connection.onMessage((data) => {
-                const decoded = spec.decode(data);
-                if (decoded) messages.push(message(decoded.payload, decoded.address));
-            });
-            scope.onDispose(() => {
-                messages.close();
-            });
-            // Shared: several consumers may subscribe to the message stream.
-            return shareStream(messages.stream);
-        },
-    });
-}
-
-/**
- * The output half of a websocket platform: consumes a command stream and
- * sends each command's encoded content through the connection. Terminal —
- * wire it last, after the features whose reply streams it consumes.
- */
-export function wsOutput<
-    const TName extends string,
-    TPlatform extends string,
-    TAddress extends Address<TPlatform>,
-    TPayload,
-    TContent,
->(
-    name: TName,
-    spec: WsSpec<TPlatform, TAddress, TPayload, TContent>,
-): Plugin<
-    { connection: WsConnection; commands: Stream<Command<TAddress, TContent>> },
-    void,
-    void,
-    TName
-> {
-    return definePlugin({
-        name,
-        apply(input, scope) {
-            const { connection } = input;
-            scope.onDispose(
-                pumpStream(
-                    input.commands,
-                    (cmd) => connection.send(spec.encode(cmd.content, cmd.address)),
-                    (error) => scope.onError(error),
-                ),
-            );
-        },
-    });
-}
-
-/**
- * One websocket platform, bundled as three leaves. The transport and output
- * are usually `bind`ed (internal wiring); the input's message stream is
- * `use`d (exposed to features). The output is terminal, so it is always
- * wired last:
-
- * ```ts
- * const wsecho = wsPlatform("wsecho", echoSpec);
- * createKernel()
- *     .bind(wsecho.transport, { option: { url } })
- *     .use(wsecho.input, { mapping: (ctx) => ({ connection: ctx["wsecho/transport"] }) })
- *     .use(reply)
- *     .bind(wsecho.output, {
- *         mapping: (ctx) => ({ connection: ctx["wsecho/transport"], commands: ctx.reply }),
- *     });
- * ```
- */
-export interface WsPlatform<
-    TName extends string,
-    TPlatform extends string,
-    TAddress extends Address<TPlatform>,
-    TPayload,
-    TContent,
-> {
-    readonly transport: Plugin<void, WsConnection, WsTransportConfig, `${TName}/transport`>;
-    readonly input: Plugin<
-        { connection: WsConnection },
-        Stream<Message<TPayload, TAddress>>,
-        void,
-        TName
-    >;
-    readonly output: Plugin<
-        { connection: WsConnection; commands: Stream<Command<TAddress, TContent>> },
-        void,
-        void,
-        `${TName}/output`
-    >;
-}
-
-/** Build a whole websocket platform (transport + input + output) from a name and a spec. */
-export function wsPlatform<
-    const TName extends string,
-    TPlatform extends string,
-    TAddress extends Address<TPlatform>,
-    TPayload,
-    TContent,
->(
-    name: TName,
-    spec: WsSpec<TPlatform, TAddress, TPayload, TContent>,
-): WsPlatform<TName, TPlatform, TAddress, TPayload, TContent> {
-    return {
-        transport: wsTransport(`${name}/transport`),
-        input: wsInput(name, spec),
-        output: wsOutput(`${name}/output`, spec),
-    };
 }

@@ -1,46 +1,22 @@
-import type { Plugin, StateBackend } from "@lambdot/core";
+import type { Plugin } from "@lambdot/core";
 import { definePlugin } from "@lambdot/core";
 
-interface Entry {
-    value: unknown;
-    expiresAt?: number;
-}
-
 /**
- * Reference state backend: in-memory, with optional per-key TTL. An ordinary
- * plugin emitting the backend as its namespace value — stateful features
- * declare it in their input and build a typed accessor with
- * `createStateAccessor(backend, name)`.
+ * The simplest state a composition can have: a plain `Map`, fresh per
+ * application. lambdot's core is stateless — state is a plugin — and this
+ * is the zero-dependency instance of that. Features declare
+ * `{ state: Map<string, unknown> }` in their input and read/write it
+ * directly, exactly as they would any host-native storage API.
  *
- * The store is created at activation: each kernel activation starts from an
- * empty `Map`, writes are not shared between kernels built from the same
- * plugin value, and state is gone when the composition stops.
+ * The store is created in `apply()`: two applications of the same
+ * definition start from independent empty maps, and the state is gone when
+ * the scope disposes.
  */
-export function memoryState(): Plugin<void, StateBackend, void, "state"> {
+export function memoryState(): Plugin<void, Map<string, unknown>, void, "state"> {
     return definePlugin({
         name: "state",
         apply() {
-            const store = new Map<string, Entry>();
-            const backend: StateBackend = {
-                async get(namespace, key) {
-                    const entry = store.get(`${namespace}:${key}`);
-                    if (!entry) return undefined;
-                    if (entry.expiresAt !== undefined && entry.expiresAt <= Date.now()) {
-                        store.delete(`${namespace}:${key}`);
-                        return undefined;
-                    }
-                    return entry.value;
-                },
-                async set(namespace, key, value, ttlMs) {
-                    const entry: Entry = { value };
-                    if (ttlMs !== undefined) entry.expiresAt = Date.now() + ttlMs;
-                    store.set(`${namespace}:${key}`, entry);
-                },
-                async delete(namespace, key) {
-                    store.delete(`${namespace}:${key}`);
-                },
-            };
-            return backend;
+            return new Map<string, unknown>();
         },
     });
 }

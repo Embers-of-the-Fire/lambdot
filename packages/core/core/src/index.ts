@@ -1,33 +1,16 @@
-export type { Disposer } from "./effect.ts";
-export type { Address, Command, Message } from "./message.ts";
-export { message } from "./message.ts";
+export { definePlugin } from "./compose.ts";
 export type {
-    AnyUnit,
-    Composite,
+    AnyPlugin,
     ConfigOf,
-    Engine,
     InOf,
-    Kernel,
     NameOf,
     OutOf,
     Plugin,
     PluginSpec,
-    Scope,
-    StartArgs,
     WireArgs,
+    WithArgs,
 } from "./plugin.ts";
 export type { StandardSchemaV1 } from "./schema.ts";
 export { ConfigValidationError } from "./schema.ts";
-export type { StateAccessor, StateBackend } from "./state.ts";
-export { createStateAccessor } from "./state.ts";
-export type { Channel, Stream } from "./stream.ts";
-export {
-    channel,
-    filterStream,
-    mapStream,
-    mergeStreams,
-    pumpStream,
-    shareStream,
-} from "./stream.ts";
-export type { KernelOptions } from "./kernel.ts";
-export { createKernel, definePlugin } from "./kernel.ts";
+export type { Disposer, OwnedScope, Scope, ScopeOptions } from "./scope.ts";
+export { createScope } from "./scope.ts";

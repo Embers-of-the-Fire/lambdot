@@ -8,6 +8,7 @@
         "fmt:check": "oxfmt --check",
         "lint": "oxlint",
         "lint:fix": "oxlint --fix",
+        "test": "node --test packages",
         "version-packages": "changeset version && pnpm install --lockfile-only --no-frozen-lockfile"
     },
     "devDependencies": {

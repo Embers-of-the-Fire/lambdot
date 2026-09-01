@@ -13,67 +13,64 @@ $ printf 'a\nb\nc\n' | nub index.ts
 ## What it demonstrates
 
 1. **The state seam.** State is not built into the framework.
-   `memoryState()` is an ordinary plugin whose output value is a
-   `StateBackend`, exposed under the `state` namespace; swap it for a
-   Redis/KV/… backend plugin and this bot doesn't change.
+   `memoryState()` is an ordinary plugin whose item map is a plain
+   `Map<string, unknown>`, fresh per application, injected under the
+   `state` namespace; swap it for a sqlite/KV/… provider and only the
+   declared input type changes.
 2. **State as a declared input.** The counter declares
-   `{ "console/lines": Stream<ConsoleLine>; state: StateBackend }` as its
-   input, so it can only be composed after both namespaces exist — there is
-   no boot order to get wrong. Remove `.use(memoryState())` and
-   `.use(counter)` stops compiling, because identity wiring can no longer
-   satisfy the declared input.
-3. **Typed, namespaced state.** Inside `apply`,
-   `createStateAccessor<CounterSchema>(input.state, "counter")` returns a
-   `StateAccessor<CounterSchema>` namespaced to this plugin —
-   `get("count")` is `number | undefined`, and unknown keys don't compile.
-   The framework itself stays stateless; the schema (and the data) belong
-   to the plugin.
-4. **Sequential stream processing.** Each stream consumer processes items
-   one at a time in arrival order, so the read-modify-write in the mapper
-   (`get` → `set`) is race-free without any locking.
+   `{ console: ConsoleIo; state: Map<string, unknown> }` as its input, so
+   it can only be composed after both namespaces exist — there is no boot
+   order to get wrong. Remove `.with(memoryState())` and `.use(counter)`
+   stops compiling, because identity wiring can no longer satisfy the
+   declared input.
+3. **No backend contract.** The feature reads and writes the map directly,
+   exactly as it would any host-native storage API. The framework itself
+   stays stateless; the data belongs to the plugin.
+4. **The listener is the loop.** Each stdin line is delivered to the
+   listener synchronously, so the read-modify-write (`get` → `set`) is
+   race-free without any locking.
 
 ## The plugin
 
 ```ts
 const counter = definePlugin({
     name: "counter",
-    apply(input: { "console/lines": Stream<ConsoleLine>; state: StateBackend }) {
-        const state = createStateAccessor<CounterSchema>(input.state, "counter");
-        return mapStream(input["console/lines"], async (event) => {
-            const count = ((await state.get("count")) ?? 0) + 1;
-            await state.set("count", count);
-            return { address: event.address, content: `#${count}: ${event.payload}` };
-        });
+    apply(input: { console: ConsoleIo; state: Map<string, unknown> }, scope) {
+        scope.onDispose(
+            input.console.onLine((line) => {
+                const count = ((input.state.get("count") as number | undefined) ?? 0) + 1;
+                input.state.set("count", count);
+                input.console.print(`#${count}: ${line}`);
+            }),
+        );
     },
 });
 ```
 
-The composition is the echo-bot chain with the backend inserted before the
+The composition is the echo-bot chain with the store inserted before the
 feature — both of the counter's inputs identity-wire once `memoryState()`
 is composed:
 
 ```ts
-const kernel = createKernel()
-    .use(cli.lines)
-    .use(memoryState())
+const app = definePlugin({ name: "app", apply: () => ({}) })
+    .with(consoleIo(), { option: {} })
+    .with(memoryState())
     // identity wiring: counter's inputs match the visible ctx
-    .use(counter)
-    .bind(cli.printer, { mapping: (ctx) => ({ replies: ctx.counter }) });
+    .use(counter);
 ```
 
 ## File layout
 
-| File       | Role                                                              |
-| ---------- | ----------------------------------------------------------------- |
-| `index.ts` | The whole bot: counter feature, console platform, memory backend. |
+| File       | Role                                                         |
+| ---------- | ------------------------------------------------------------ |
+| `index.ts` | The whole bot: counter feature, console service, memory map. |
 
 ## See also
 
 - [echo-bot](../echo-bot) — the console echo bot this one extends with
   state.
-- [@lambdot/state-memory](../../packages/state/memory) — the `StateBackend`
-  used here; serves the `state` namespace from a process-local map.
-- [@lambdot/state-sqlite](../../packages/state/sqlite) — not a
-  `StateBackend`: it owns a `node:sqlite` connection (`DatabaseSync`) and
-  emits it as its namespace value, for features to build their own
-  persistence on.
+- [@lambdot/state-memory](../../packages/state/memory) — the provider used
+  here; serves the `state` namespace from a process-local map.
+- [@lambdot/state-sqlite](../../packages/state/sqlite) — owns a
+  `node:sqlite` connection (`DatabaseSync`) and emits it as its item map,
+  for features that want persistence.

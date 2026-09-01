@@ -1,32 +1,18 @@
-import type { ConsoleLine } from "@lambdot/console";
-import type { Message, Stream } from "@lambdot/core";
-import { definePlugin, mapStream, mergeStreams } from "@lambdot/core";
-
-import type { WsEchoAddress } from "./echo-spec.ts";
+import type { ConsoleIo } from "@lambdot/console";
+import { definePlugin } from "@lambdot/core";
+import type { WsConnection } from "@lambdot/websocket";
 
 /**
- * The point of this example: one echo behavior, two platforms. The feature
- * declares both platforms' message streams as its input and merges them into
- * one command stream; each output filters the commands back down to its own
- * platform tag at wiring time.
- *
- * The handler is platform-agnostic because the envelope carries its own
- * return address: the command's `address` routes the reply back through
- * whichever output claims the address's `platform` tag.
+ * The point of this example: one echo behavior, two services. The feature
+ * declares both as its input — the console and the websocket connection —
+ * subscribes to each, and replies through whichever service the input
+ * arrived on. Each listener's closure knows its own reply channel; there is
+ * no envelope and no routing tag.
  */
 export const echo = definePlugin({
     name: "echo",
-    apply(input: {
-        "console/lines": Stream<ConsoleLine>;
-        wsecho: Stream<Message<string, WsEchoAddress>>;
-    }) {
-        function reply(event: Message<string, ConsoleLine["address"] | WsEchoAddress>) {
-            return { address: event.address, content: `echo: ${event.payload}` };
-        }
-
-        return mergeStreams(
-            mapStream(input["console/lines"], reply),
-            mapStream(input.wsecho, reply),
-        );
+    apply(input: { console: ConsoleIo; socket: WsConnection }, scope) {
+        scope.onDispose(input.console.onLine((line) => input.console.print(`echo: ${line}`)));
+        scope.onDispose(input.socket.listen((data) => input.socket.push(`echo: ${data}`)));
     },
 });
