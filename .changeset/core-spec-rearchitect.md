@@ -1,15 +1,15 @@
 ---
-"@lambdot/console": major
-"@lambdot/core": major
-"@lambdot/env": major
-"@lambdot/host-cloudflare": major
-"@lambdot/host-hono": major
-"@lambdot/http": major
-"@lambdot/logging": major
-"@lambdot/protocol-qq": major
-"@lambdot/state-memory": major
-"@lambdot/state-sqlite": major
-"@lambdot/websocket": major
+"@lambdot/console": minor
+"@lambdot/core": minor
+"@lambdot/env": minor
+"@lambdot/host-cloudflare": minor
+"@lambdot/host-hono": minor
+"@lambdot/http": minor
+"@lambdot/logging": minor
+"@lambdot/protocol-qq": minor
+"@lambdot/state-memory": minor
+"@lambdot/state-sqlite": minor
+"@lambdot/websocket": minor
 ---
 
 Rearchitect the ecosystem per the specification: one concept (the plugin), one mechanism (context injection) in two forms — `use` grants a dependency the accumulated context (declaration order is observable), `with` grants it a blank context (hermetic; no mapping). A plugin's own logic runs last, over the final accumulated context, and produces the plugin's own item map, which never enters its own context; used as a dependency, the whole item map nests under one namespace of the parent's context. Plugins are immutable, stateless definitions; composition is non-destructive (`A.use(B)` / `A.with(B)` return new plugins and leave `A` unchanged). Application is caller-driven through an owned scope (`createScope` + `plugin.apply`); teardown unwinds LIFO through the scope, and failures mid-application dispose everything already applied in reverse before propagating. Config values are supplied per use site (`option`) and validated against Standard Schema validators. Diagnostics follow the abstract/handler pattern: plugins declare an optional sink in their input contract and emit only when one is wired in. Removes kernels, engines, composites, the `start`/`stop`/`ctx` lifecycle, `bind`/`expose`, background activation, and the message/state/stream utilities (concerns are ordinary plugins, not core).
