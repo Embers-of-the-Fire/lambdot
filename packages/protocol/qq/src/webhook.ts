@@ -3,31 +3,21 @@ import { definePlugin } from "@lambdot/core";
 import type { HttpServer } from "@lambdot/http";
 import nacl from "tweetnacl";
 
-import { createQqApi } from "./api.ts";
 import { readQqCredentials, type QqCredentialKeys } from "./credentials.ts";
-import { decodeMessageEvent, type QqMessage } from "./events.ts";
+import { decodeQqEvent, type QqEvent } from "./events.ts";
 
 /**
- * One decoded message delivered to a {@link QqWebhook} listener, with its
- * reply channel: `reply` sends a passive reply back to the conversation the
- * message arrived from (the address — scope, openid, `msg_id` reference —
- * travels with the event, not in a shared envelope).
- */
-export interface QqMessageEvent {
-    readonly message: QqMessage;
-    /** Passively reply to this message's conversation. */
-    reply(content: string): Promise<void>;
-}
-
-/**
- * The webhook service, emitted as the plugin's item map: subscribe to
- * decoded message dispatches. Where the callback route lives is the host's
- * decision — the plugin only knows the abstract `HttpServer` it registers
- * on.
+ * The webhook service, emitted as the plugin's item map: subscribe to decoded
+ * event dispatches. The webhook is a pure listener — it holds no REST client
+ * and no per-message reply state. Replying goes through `qqApi` with the
+ * event's own `context`, so the passive-reply reference is always resolved
+ * from the context the caller provides. Where the callback route lives is the
+ * host's decision — the plugin only knows the abstract `HttpServer` it
+ * registers on.
  */
 export interface QqWebhook {
-    /** Subscribe to decoded message events. The disposer unsubscribes. */
-    onMessage(listener: (event: QqMessageEvent) => void): Disposer;
+    /** Subscribe to decoded C2C/group events. The disposer unsubscribes. */
+    onEvent(listener: (event: QqEvent) => void): Disposer;
 }
 
 export interface QqWebhookConfig {
@@ -35,8 +25,6 @@ export interface QqWebhookConfig {
     readonly path?: string;
     /** Which env variables carry the credentials. */
     readonly keys?: QqCredentialKeys;
-    /** Open-platform base URL; override to point at a mock in tests. */
-    readonly apiBase?: string;
 }
 
 /**
@@ -45,10 +33,10 @@ export interface QqWebhookConfig {
  * wired-in {@link HttpServer} and implements the callback algorithm — op 13
  * address validation (sign `event_ts + plain_token`), ed25519 verification
  * of `X-Signature-Ed25519` over `timestamp + body` for everything else —
- * then delivers decoded message dispatches to `onMessage` listeners. The
- * bot secret seeds the ed25519 keypair (repeated to 32 bytes). The route
- * lives as long as the host's server; the listeners clear when the owning
- * scope disposes.
+ * then delivers decoded op-0 dispatches to `onEvent` listeners. The bot
+ * secret seeds the ed25519 keypair (repeated to 32 bytes). The route lives
+ * as long as the host's server; the listeners clear when the owning scope
+ * disposes.
  *
  * ```ts
  * app.with(envVars("qq-env", ["QQ_BOT_APP_ID", "QQ_BOT_APP_SECRET"]))
@@ -70,13 +58,12 @@ export function qqWebhook<const TName extends string>(
         name,
         apply(input, scope, config) {
             const credentials = readQqCredentials(input.env, config.keys);
-            const api = createQqApi(credentials, config);
             // The bot secret seeds the ed25519 keypair: repeat to 32 bytes.
             let seed = credentials.clientSecret;
             while (seed.length < 32) seed += seed;
             const keyPair = nacl.sign.keyPair.fromSeed(new TextEncoder().encode(seed.slice(0, 32)));
 
-            const listeners = new Set<(event: QqMessageEvent) => void>();
+            const listeners = new Set<(event: QqEvent) => void>();
             scope.onDispose(() => {
                 listeners.clear();
             });
@@ -84,7 +71,7 @@ export function qqWebhook<const TName extends string>(
             input.http.on("POST", config.path ?? "/qq/callback", async (c) => {
                 const request = c.req.raw;
                 const body = await request.text();
-                let frame: { op?: unknown; d?: unknown; t?: unknown };
+                let frame: { op?: unknown; id?: unknown; d?: unknown; t?: unknown };
                 try {
                     frame = JSON.parse(body) as typeof frame;
                 } catch {
@@ -119,21 +106,15 @@ export function qqWebhook<const TName extends string>(
                 )
                     return new Response("unauthorized", { status: 401 });
 
-                if (frame.op === 0 && typeof frame.t === "string") {
-                    const decoded = decodeMessageEvent(frame.t, frame.d);
-                    if (decoded) {
-                        const event: QqMessageEvent = {
-                            message: decoded.message,
-                            reply: (content) => api.sendMessage(decoded.address, content),
-                        };
-                        for (const listener of listeners) listener(event);
-                    }
+                if (frame.op === 0) {
+                    const event = decodeQqEvent({ id: frame.id, t: frame.t, d: frame.d });
+                    if (event !== null) for (const listener of listeners) listener(event);
                 }
                 return Response.json({});
             });
 
             return {
-                onMessage(listener) {
+                onEvent(listener) {
                     listeners.add(listener);
                     return () => {
                         listeners.delete(listener);

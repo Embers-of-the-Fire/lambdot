@@ -36,6 +36,8 @@ async function withFetch(
 }
 
 const tokenResponse = () => Response.json({ access_token: "token-1", expires_in: "7200" });
+const okApi = () =>
+    createQqApi({ appId: "app", clientSecret: "secret" }, { apiBase: "https://mock.test" });
 
 void test("qq api caches the access token and authorizes requests", async () => {
     await withFetch(
@@ -44,10 +46,7 @@ void test("qq api caches the access token and authorizes requests", async () => 
             return Response.json({ url: "wss://gateway.example" });
         },
         async (recorded) => {
-            const api = createQqApi(
-                { appId: "app", clientSecret: "secret" },
-                { apiBase: "https://mock.test" },
-            );
+            const api = okApi();
             assert.equal(api.appId, "app");
             await api.accessToken();
             await api.accessToken();
@@ -66,57 +65,221 @@ void test("qq api caches the access token and authorizes requests", async () => 
     );
 });
 
-void test("sendMessage routes by scope and auto-increments msg_seq per msgId", async () => {
+void test("sends route by scene and resolve the caller-provided context", async () => {
+    await withFetch(
+        (request) => {
+            if (request.url.endsWith("/app/getAppAccessToken")) return tokenResponse();
+            return Response.json({ id: "sent-1", timestamp: "2026-09-01T00:00:00+08:00" });
+        },
+        async (recorded) => {
+            const api = okApi();
+            const passive = await api.sendGroupMessage(
+                "g1",
+                { msgType: 0, content: "reply" },
+                { msgId: "m1", msgSeq: 2 },
+            );
+            assert.deepEqual(passive, { id: "sent-1", timestamp: "2026-09-01T00:00:00+08:00" });
+            await api.sendC2cMessage(
+                "u1",
+                { msgType: 0, content: "by event" },
+                {
+                    eventId: "e1",
+                },
+            );
+            await api.sendC2cMessage("u1", { msgType: 0, content: "wakeup" }, { wakeup: true });
+            await api.sendGroupMessage("g1", { msgType: 0, content: "active" });
+
+            const sends = recorded.filter((r) => r.url.includes("/messages"));
+            assert.equal(sends[0]!.url, "https://mock.test/v2/groups/g1/messages");
+            assert.deepEqual(JSON.parse(sends[0]!.body!), {
+                msg_type: 0,
+                content: "reply",
+                msg_id: "m1",
+                msg_seq: 2,
+            });
+            assert.equal(sends[1]!.url, "https://mock.test/v2/users/u1/messages");
+            assert.deepEqual(JSON.parse(sends[1]!.body!), {
+                msg_type: 0,
+                content: "by event",
+                event_id: "e1",
+            });
+            assert.deepEqual(JSON.parse(sends[2]!.body!), {
+                msg_type: 0,
+                content: "wakeup",
+                is_wakeup: true,
+            });
+            assert.deepEqual(JSON.parse(sends[3]!.body!), { msg_type: 0, content: "active" });
+        },
+    );
+});
+
+void test("sends encode markdown, media, input_notify, keyboards, and references", async () => {
+    await withFetch(
+        (request) => {
+            if (request.url.endsWith("/app/getAppAccessToken")) return tokenResponse();
+            return Response.json({
+                id: "sent-1",
+                timestamp: "t",
+                ext_info: { ref_idx: "REFIDX_x==" },
+            });
+        },
+        async (recorded) => {
+            const api = okApi();
+            const sent = await api.sendC2cMessage("u1", {
+                msgType: 2,
+                markdown: { content: "# hi", forceVerifyImageResource: true },
+                keyboard: {
+                    content: {
+                        rows: [
+                            {
+                                buttons: [
+                                    {
+                                        id: "b1",
+                                        renderData: { label: "go", style: 1 },
+                                        action: {
+                                            type: 2,
+                                            data: "/go",
+                                            enter: true,
+                                            permission: { type: 2 },
+                                        },
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                },
+                reference: "REFIDX_0==",
+            });
+            assert.equal(sent.refIdx, "REFIDX_x==");
+            await api.sendGroupMessage(
+                "g1",
+                { msgType: 7, fileInfo: "file-info-1", content: "look" },
+                { msgId: "m1" },
+            );
+            await api.sendC2cMessage("u1", { msgType: 6, inputSeconds: 30 }, { msgId: "m2" });
+
+            const sends = recorded.filter((r) => r.url.includes("/messages"));
+            assert.deepEqual(JSON.parse(sends[0]!.body!), {
+                msg_type: 2,
+                markdown: { content: "# hi", force_verify_image_resource: true },
+                keyboard: {
+                    content: {
+                        rows: [
+                            {
+                                buttons: [
+                                    {
+                                        id: "b1",
+                                        render_data: { label: "go", style: 1 },
+                                        action: {
+                                            type: 2,
+                                            data: "/go",
+                                            enter: true,
+                                            permission: { type: 2 },
+                                        },
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                },
+                message_reference: { message_id: "REFIDX_0==" },
+            });
+            assert.deepEqual(JSON.parse(sends[1]!.body!), {
+                msg_type: 7,
+                media: { file_info: "file-info-1" },
+                content: "look",
+                msg_id: "m1",
+            });
+            assert.deepEqual(JSON.parse(sends[2]!.body!), {
+                msg_type: 6,
+                input_notify: { input_type: 1, input_second: 30 },
+                msg_id: "m2",
+            });
+        },
+    );
+});
+
+void test("group sends reject msg_type 6 (input_notify is c2c-only)", async () => {
+    await withFetch(
+        () => tokenResponse(),
+        async () => {
+            const api = okApi();
+            await assert.rejects(
+                api.sendGroupMessage("g1", { msgType: 6, inputSeconds: 10 }),
+                /input_notify/,
+            );
+        },
+    );
+});
+
+void test("recalls delete the message in the matching scene", async () => {
     await withFetch(
         (request) => {
             if (request.url.endsWith("/app/getAppAccessToken")) return tokenResponse();
             return Response.json({});
         },
         async (recorded) => {
-            const api = createQqApi(
-                { appId: "app", clientSecret: "secret" },
-                { apiBase: "https://mock.test" },
-            );
-            await api.sendMessage({ scope: "group", openid: "g1", msgId: "m1" }, "first");
-            await api.sendMessage({ scope: "group", openid: "g1", msgId: "m1" }, "second");
-            await api.sendMessage({ scope: "c2c", openid: "u1" }, "active");
+            const api = okApi();
+            await api.recallC2cMessage("u1", "m1");
+            await api.recallGroupMessage("g1", "m2");
 
-            const sends = recorded.filter((r) => r.url.includes("/messages"));
-            assert.equal(sends[0]!.url, "https://mock.test/v2/groups/g1/messages");
-            assert.deepEqual(JSON.parse(sends[0]!.body!), {
-                msg_type: 0,
-                content: "first",
-                msg_id: "m1",
-                msg_seq: 1,
-            });
-            assert.deepEqual(JSON.parse(sends[1]!.body!), {
-                msg_type: 0,
-                content: "second",
-                msg_id: "m1",
-                msg_seq: 2,
-            });
-            assert.equal(sends[2]!.url, "https://mock.test/v2/users/u1/messages");
-            assert.deepEqual(JSON.parse(sends[2]!.body!), { msg_type: 0, content: "active" });
+            const recalls = recorded.filter((r) => r.method === "DELETE");
+            assert.equal(recalls[0]!.url, "https://mock.test/v2/users/u1/messages/m1");
+            assert.equal(recalls[1]!.url, "https://mock.test/v2/groups/g1/messages/m2");
+            assert.equal(recalls[0]!.authorization, "QQBot token-1");
         },
     );
 });
 
-void test("sendMessage honors an explicit msgSeq", async () => {
+void test("uploads post the file and return its file_info", async () => {
     await withFetch(
-        () => Response.json({ access_token: "t", expires_in: 7200 }),
+        (request) => {
+            if (request.url.endsWith("/app/getAppAccessToken")) return tokenResponse();
+            return Response.json({ file_uuid: "uuid-1", file_info: "info-1", ttl: 300 });
+        },
         async (recorded) => {
-            const api = createQqApi(
-                { appId: "app", clientSecret: "secret" },
-                { apiBase: "https://mock.test" },
-            );
-            await api.sendMessage({ scope: "c2c", openid: "u1", msgId: "m9", msgSeq: 41 }, "x");
-            const send = recorded.find((r) => r.url.includes("/messages"));
-            assert.deepEqual(JSON.parse(send!.body!), {
-                msg_type: 0,
-                content: "x",
-                msg_id: "m9",
-                msg_seq: 41,
+            const api = okApi();
+            const uploaded = await api.uploadC2cFile("u1", {
+                fileType: 1,
+                url: "https://example.com/a.png",
+                srvSendMsg: false,
             });
+            assert.deepEqual(uploaded, { fileUuid: "uuid-1", fileInfo: "info-1", ttl: 300 });
+            await api.uploadGroupFile("g1", { fileType: 4, uploadId: "task-1", fileName: "a.zip" });
+
+            const uploads = recorded.filter((r) => r.url.includes("/files"));
+            assert.equal(uploads[0]!.url, "https://mock.test/v2/users/u1/files");
+            assert.deepEqual(JSON.parse(uploads[0]!.body!), {
+                file_type: 1,
+                url: "https://example.com/a.png",
+                srv_send_msg: false,
+            });
+            assert.equal(uploads[1]!.url, "https://mock.test/v2/groups/g1/files");
+            assert.deepEqual(JSON.parse(uploads[1]!.body!), {
+                file_type: 4,
+                upload_id: "task-1",
+                file_name: "a.zip",
+            });
+        },
+    );
+});
+
+void test("ackInteraction puts the result code", async () => {
+    await withFetch(
+        (request) => {
+            if (request.url.endsWith("/app/getAppAccessToken")) return tokenResponse();
+            return Response.json({});
+        },
+        async (recorded) => {
+            const api = okApi();
+            await api.ackInteraction("interaction-1");
+            await api.ackInteraction("interaction-2", 3);
+
+            const acks = recorded.filter((r) => r.url.includes("/interactions/"));
+            assert.equal(acks[0]!.url, "https://mock.test/interactions/interaction-1");
+            assert.equal(acks[0]!.method, "PUT");
+            assert.deepEqual(JSON.parse(acks[0]!.body!), { code: 0 });
+            assert.deepEqual(JSON.parse(acks[1]!.body!), { code: 3 });
         },
     );
 });

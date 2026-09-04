@@ -1,20 +1,27 @@
 /**
  * Compile-time assertions for the qq webhook composition, mirroring
- * echo-bot/type-test.ts: env + http → webhook → reply.
+ * echo-bot/type-test.ts: env + http → webhook → api → reply.
  */
 import { definePlugin } from "@lambdot/core";
 import { envVars } from "@lambdot/env";
 import { httpHono } from "@lambdot/host-hono";
-import { qqWebhook, type QqWebhook } from "@lambdot/protocol-qq";
+import { qqApi, qqWebhook, type QqApi, type QqWebhook } from "@lambdot/protocol-qq";
 import { Hono } from "hono";
 
 const hono = new Hono();
 
 const reply = definePlugin({
     name: "reply",
-    apply(input: { qq: QqWebhook }, scope) {
+    apply(input: { qq: QqWebhook; api: QqApi }, scope) {
         scope.onDispose(
-            input.qq.onMessage((event) => void event.reply(`echo: ${event.message.content}`)),
+            input.qq.onEvent((event) => {
+                if (event.type === "GROUP_AT_MESSAGE_CREATE")
+                    void input.api.sendGroupMessage(
+                        event.groupOpenid,
+                        { msgType: 0, content: `echo: ${event.message.content.trim()}` },
+                        event.context,
+                    );
+            }),
         );
     },
 });
@@ -25,6 +32,10 @@ const app = definePlugin({ name: "app", apply: () => ({}) })
     .use(qqWebhook("qq"), {
         option: {},
         mapping: (ctx) => ({ http: ctx.http, env: ctx["qq-env"] }),
+    })
+    .use(qqApi("api"), {
+        option: {},
+        mapping: (ctx) => ({ env: ctx["qq-env"] }),
     })
     .use(reply);
 void app;
@@ -55,9 +66,14 @@ void definePlugin({ name: "bare", apply: () => ({}) })
         mapping: (ctx) => ({ http: ctx.http, env: ctx["qq-env"] }),
     });
 
-// reply identity-wires only once the webhook's namespace exists
+// the REST client declares required input too ({ env })
+void definePlugin({ name: "bare", apply: () => ({}) })
+    // @ts-expect-error mapping is required: no "env" is visible
+    .use(qqApi("api"), { option: {} });
+
+// reply identity-wires only once both namespaces exist
 void definePlugin({ name: "bare", apply: () => ({}) })
     .with(envVars("qq-env", ["QQ_BOT_APP_ID", "QQ_BOT_APP_SECRET"]))
     .with(httpHono, { option: { hono } })
-    // @ts-expect-error no "qq" namespace yet — the webhook is not composed
+    // @ts-expect-error no "qq"/"api" namespaces yet — nothing is composed
     .use(reply);
