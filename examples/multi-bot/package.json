@@ -1,5 +1,5 @@
 {
-    "name": "@lambdot-example/multi-kernel-bot",
+    "name": "@lambdot-example/multi-bot",
     "version": "0.0.1",
     "private": true,
     "type": "module",

@@ -1,34 +1,28 @@
-import type { Command, Message, Stream } from "@lambdot/core";
-import { createKernel, definePlugin, filterStream, mapStream, mergeStreams } from "@lambdot/core";
-import { wsPlatform } from "@lambdot/websocket";
+import { createScope, definePlugin } from "@lambdot/core";
+import { wsConnection, type WsConnection } from "@lambdot/websocket";
 
 import { startEchoServer } from "./server.ts";
-import { echoSpec, type WsEchoAddress } from "./specs.ts";
-
-type AddressA = WsEchoAddress<"a">;
-type AddressB = WsEchoAddress<"b">;
 
 /**
- * One reply behavior, two websocket instances. Each instance's message
- * stream is a separate namespace, merged into one command stream; each
- * output then filters the commands back down to its own platform tag —
- * `address.platform` routes each reply out the socket it arrived on.
+ * One reply behavior, two websocket connections. Each connection is a
+ * separate namespace; each listener's closure replies through the socket it
+ * subscribed to — no tags, no routing at the wiring.
  */
-const reply = definePlugin({
-    name: "reply",
-    apply(input: {
-        "wsecho-a": Stream<Message<string, AddressA>>;
-        "wsecho-b": Stream<Message<string, AddressB>>;
-    }) {
-        function echo(event: Message<string, AddressA | AddressB>) {
-            console.log(`[${event.address.platform}] id=${event.id} payload=${event.payload}`);
-            return {
-                address: event.address,
-                content: `echo(${event.address.platform}): ${event.payload}`,
-            };
-        }
-
-        return mergeStreams(mapStream(input["wsecho-a"], echo), mapStream(input["wsecho-b"], echo));
+const echo = definePlugin({
+    name: "echo",
+    apply(input: { "socket-a": WsConnection; "socket-b": WsConnection }, scope) {
+        scope.onDispose(
+            input["socket-a"].listen((data) => {
+                console.log(`[a] ${data}`);
+                input["socket-a"].push(`echo(a): ${data}`);
+            }),
+        );
+        scope.onDispose(
+            input["socket-b"].listen((data) => {
+                console.log(`[b] ${data}`);
+                input["socket-b"].push(`echo(b): ${data}`);
+            }),
+        );
     },
 });
 
@@ -37,37 +31,14 @@ const serverB = await startEchoServer(8081);
 const urlA = `ws://127.0.0.1:${serverA.port}`;
 const urlB = `ws://127.0.0.1:${serverB.port}`;
 
-// Distinct platform names fold side by side; each platform's input/output
-// wires its own transport's connection.
-const wsechoA = wsPlatform("wsecho-a", echoSpec("a"));
-const wsechoB = wsPlatform("wsecho-b", echoSpec("b"));
+// Distinct names compose side by side; the feature reads both namespaces.
+const app = definePlugin({ name: "app", apply: () => ({}) })
+    .with(wsConnection("socket-a"), { option: { url: urlA } })
+    .with(wsConnection("socket-b"), { option: { url: urlB } })
+    .use(echo);
 
-const kernel = createKernel()
-    .bind(wsechoA.transport, { option: { url: urlA } })
-    .use(wsechoA.input, { mapping: (ctx) => ({ connection: ctx["wsecho-a/transport"] }) })
-    .bind(wsechoB.transport, { option: { url: urlB } })
-    .use(wsechoB.input, { mapping: (ctx) => ({ connection: ctx["wsecho-b/transport"] }) })
-    .use(reply)
-    .bind(wsechoA.output, {
-        mapping: (ctx) => ({
-            connection: ctx["wsecho-a/transport"],
-            commands: filterStream(
-                ctx.reply,
-                (cmd): cmd is Command<AddressA, string> => cmd.address.platform === "wsecho-a",
-            ),
-        }),
-    })
-    .bind(wsechoB.output, {
-        mapping: (ctx) => ({
-            connection: ctx["wsecho-b/transport"],
-            commands: filterStream(
-                ctx.reply,
-                (cmd): cmd is Command<AddressB, string> => cmd.address.platform === "wsecho-b",
-            ),
-        }),
-    });
-
-await kernel.start();
+const scope = createScope();
+await app.apply({}, scope, undefined);
 
 // Drive both instances concurrently and verify each reply arrives on the
 // socket its request came from — no cross-dispatch.
@@ -104,15 +75,15 @@ const [receivedA, receivedB] = await Promise.all([
 console.log(`driver A received: ${receivedA}`);
 console.log(`driver B received: ${receivedB}`);
 
-await kernel.stop();
+await scope.dispose();
 await serverA.close();
 await serverB.close();
 
-if (receivedA !== "echo(wsecho-a): hello from driver A") {
+if (receivedA !== "echo(a): hello from driver A") {
     console.error(`dual-websocket-bot: FAIL — unexpected reply on A "${receivedA}"`);
     process.exit(1);
 }
-if (receivedB !== "echo(wsecho-b): hello from driver B") {
+if (receivedB !== "echo(b): hello from driver B") {
     console.error(`dual-websocket-bot: FAIL — unexpected reply on B "${receivedB}"`);
     process.exit(1);
 }

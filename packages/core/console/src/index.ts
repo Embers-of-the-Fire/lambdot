@@ -1,90 +1,72 @@
 import { createInterface } from "node:readline/promises";
+import type { Readable, Writable } from "node:stream";
 
-import type { Address, Command, Message, Plugin, Stream } from "@lambdot/core";
-import { channel, definePlugin, message, pumpStream, shareStream } from "@lambdot/core";
+import type { Disposer, Plugin } from "@lambdot/core";
+import { definePlugin } from "@lambdot/core";
 
 /**
- * Where a console message goes. Owned by the printer half of the console
- * platform — printers consume addresses, line sources produce them.
+ * The console service, emitted as the plugin's item map: stdin lines in,
+ * stdout/stderr writes out. Consumers subscribe to lines and print text;
+ * where the streams actually go is the plugin's config, not the consumer's.
  */
-export interface ConsoleAddress extends Address<"console"> {
-    readonly target: "stdout" | "stderr";
+export interface ConsoleIo {
+    /** Subscribe to lines read from stdin. The disposer unsubscribes. */
+    onLine(listener: (line: string) => void): Disposer;
+    /** Write one line (a trailing newline is added) to a console target. */
+    print(text: string, target?: "stdout" | "stderr"): void;
 }
 
-/** One line read from stdin. */
-export type ConsoleLine = Message<string, ConsoleAddress>;
+/** Config for {@link consoleIo}: the streams behind the service. */
+export interface ConsoleIoConfig {
+    /** Line source; defaults to `process.stdin`. */
+    readonly input?: Readable;
+    /** Defaults to `process.stdout`. */
+    readonly stdout?: Writable;
+    /** Defaults to `process.stderr`. */
+    readonly stderr?: Writable;
+}
 
-/** One line to print: plain text to a console target. */
-export type ConsoleReply = Command<ConsoleAddress, string>;
-
-/** The input half of the console platform: a stream of lines read from stdin. */
-export function consoleLines(): Plugin<void, Stream<ConsoleLine>, void, "console/lines"> {
+/**
+ * The console as an ordinary plugin: read stdin line by line, write to
+ * stdout/stderr. A terminal needs no external service, so this is where the
+ * framework's contracts are exercised first. The readline interface closes
+ * when the owning scope disposes.
+ *
+ * ```ts
+ * const echo = definePlugin({
+ *     name: "echo",
+ *     apply(input: { console: ConsoleIo }, scope) {
+ *         scope.onDispose(input.console.onLine((line) => input.console.print(`echo: ${line}`)));
+ *     },
+ * });
+ *
+ * app.with(consoleIo(), { option: {} }).use(echo);
+ * ```
+ */
+export function consoleIo(): Plugin<void, ConsoleIo, ConsoleIoConfig, "console"> {
     return definePlugin({
-        name: "console/lines",
-        apply(_input, scope) {
-            const lines = channel<ConsoleLine>();
-            const rl = createInterface({ input: process.stdin, terminal: false });
-            rl.on("line", (line) => {
-                lines.push(message(line, { platform: "console", target: "stdout" }));
+        name: "console",
+        apply(_input, scope, config) {
+            const stdout = config.stdout ?? process.stdout;
+            const stderr = config.stderr ?? process.stderr;
+            const rl = createInterface({
+                input: config.input ?? process.stdin,
+                terminal: false,
             });
             scope.onDispose(() => {
                 rl.close();
-                lines.close();
             });
-            // Shared: several consumers (features, loggers, supervisors) may
-            // each subscribe to the line stream.
-            return shareStream(lines.stream);
+            return {
+                onLine(listener) {
+                    rl.on("line", listener);
+                    return () => {
+                        rl.off("line", listener);
+                    };
+                },
+                print(text, target = "stdout") {
+                    (target === "stderr" ? stderr : stdout).write(`${text}\n`);
+                },
+            };
         },
     });
-}
-
-/** The output half of the console platform: prints a reply stream to stdout/stderr. */
-export function consolePrinter(): Plugin<
-    { replies: Stream<ConsoleReply> },
-    void,
-    void,
-    "console/printer"
-> {
-    return definePlugin({
-        name: "console/printer",
-        apply(input, scope) {
-            scope.onDispose(
-                pumpStream(
-                    input.replies,
-                    ({ address, content }) => {
-                        const stream =
-                            address.target === "stderr" ? process.stderr : process.stdout;
-                        stream.write(`${content}\n`);
-                    },
-                    (error) => scope.onError(error),
-                ),
-            );
-        },
-    });
-}
-
-/**
- * One console platform, bundled: the stdin line source and the stdout/stderr
- * printer. The printer is terminal — it consumes a reply stream produced by
- * later feature plugins, so it is wired last with a mapping:
-
- * ```ts
- * const cli = consolePlatform();
- * createKernel()
- *     .use(cli.lines)
- *     .use(echo)
- *     .use(cli.printer, { mapping: (ctx) => ({ replies: ctx.echo }) });
- * ```
- */
-export interface ConsolePlatform {
-    readonly lines: Plugin<void, Stream<ConsoleLine>, void, "console/lines">;
-    readonly printer: Plugin<{ replies: Stream<ConsoleReply> }, void, void, "console/printer">;
-}
-
-/** Build a whole console platform (stdin lines + stdout/stderr printer). */
-export function consolePlatform(): ConsolePlatform {
-    return {
-        lines: consoleLines(),
-        printer: consolePrinter(),
-    };
 }

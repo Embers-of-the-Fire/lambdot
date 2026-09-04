@@ -13,9 +13,15 @@
     "publishConfig": {
         "access": "public"
     },
+    "scripts": {
+        "test": "node --test"
+    },
     "dependencies": {
         "@lambdot/core": "workspace:*",
-        "@lambdot/websocket": "workspace:*",
+        "@lambdot/http": "workspace:*",
         "tweetnacl": "^1.0.3"
+    },
+    "devDependencies": {
+        "hono": "^4.13.5"
     }
 }

@@ -1,5 +1,5 @@
-import type { Plugin, Stream } from "@lambdot/core";
-import { channel, definePlugin, pumpStream, shareStream } from "@lambdot/core";
+import type { Plugin } from "@lambdot/core";
+import { definePlugin } from "@lambdot/core";
 
 /** Severity of a {@link LogRecord}, ordered: debug < info < warn < error. */
 export type LogLevel = "debug" | "info" | "warn" | "error";
@@ -27,15 +27,6 @@ export interface Logger {
     error(message: string, data?: unknown): void;
 }
 
-/**
- * A logger whose records are also exposed as a broadcast stream — the
- * wiring point for sinks. The `records` stream is shared: several sinks
- * (console, file, a chat platform) may each subscribe to it.
- */
-export interface LoggerSource extends Logger {
-    readonly records: Stream<LogRecord>;
-}
-
 /** Render a record as one human-readable line (no trailing newline). */
 export function formatLogRecord(record: LogRecord): string {
     const time = new Date(record.timestamp).toISOString();
@@ -59,7 +50,20 @@ function writeToConsole(record: LogRecord): void {
     stream.write(`${formatLogRecord(record)}\n`);
 }
 
-function loggerFrom(emit: (record: LogRecord) => void): Logger {
+/**
+ * Build a `Logger` from a plain function: each level method stamps a
+ * {@link LogRecord} and hands it to `emit`. This is how sinks are written —
+ * a file writer, a level filter, a test recorder — with no plugin machinery
+ * of their own:
+ *
+ * ```ts
+ * const fileLogger = loggerFrom((record) => appendFileSync(path, `${formatLogRecord(record)}\n`));
+ * const warningsUp = loggerFrom((record) => {
+ *     if (record.level !== "debug" && record.level !== "info") writeToConsole(record);
+ * });
+ * ```
+ */
+export function loggerFrom(emit: (record: LogRecord) => void): Logger {
     const at =
         (level: LogLevel) =>
         (message: string, data?: unknown): void => {
@@ -69,12 +73,13 @@ function loggerFrom(emit: (record: LogRecord) => void): Logger {
 }
 
 /**
- * The unregistered console logger: a `Logger` whose methods print directly
- * to the console — no record stream is registered and no sink is wired.
- * The zero-composition choice: drop it in and `ctx.log` works.
+ * The console logger: a `Logger` whose methods print to the console
+ * (warn/error to stderr, debug/info to stdout). The zero-composition
+ * handler: wire it under `log` and features declaring `{ log: Logger }`
+ * work:
  *
  * ```ts
- * createKernel().use(consoleLogger()).use(myFeature); // myFeature takes { log: Logger }
+ * app.with(consoleLogger()).use(myFeature); // myFeature takes { log: Logger }
  * ```
  */
 export function consoleLogger(): Plugin<void, Logger, void, "log"> {
@@ -82,64 +87,6 @@ export function consoleLogger(): Plugin<void, Logger, void, "log"> {
         name: "log",
         apply() {
             return loggerFrom(writeToConsole);
-        },
-    });
-}
-
-/**
- * The higher-ranked logger: emits the same `Logger` hooks as
- * {@link consoleLogger}, but records flow onto a broadcast stream instead
- * of to the console — the user points another logging plugin (a sink) at
- * `ctx.log.records`. Nothing is printed until a sink is wired; records
- * logged before the first sink attaches buffer in the stream.
- *
- * ```ts
- * createKernel()
- *     .use(logger())
- *     .use(myFeature) // takes { log: Logger }
- *     .bind(consoleLogSink(), { mapping: (ctx) => ({ records: ctx.log.records }) });
- * ```
- */
-export function logger(): Plugin<void, LoggerSource, void, "log"> {
-    return definePlugin({
-        name: "log",
-        apply(_input, scope) {
-            const records = channel<LogRecord>();
-            scope.onDispose(() => records.close());
-            return {
-                ...loggerFrom((record) => records.push(record)),
-                records: shareStream(records.stream),
-            };
-        },
-    });
-}
-
-/**
- * The console sink: consumes a record stream and prints each record
- * (warn/error to stderr, debug/info to stdout). Wire it to a {@link logger}
- * namespace with a mapping, or to any `Stream<LogRecord>` — filtering by
- * level is an ordinary stream transform:
- *
- * ```ts
- * .bind(consoleLogSink(), {
- *     mapping: (ctx) => ({
- *         records: filterStream(ctx.log.records, (r) => r.level !== "debug"),
- *     }),
- * })
- * ```
- */
-export function consoleLogSink(): Plugin<
-    { records: Stream<LogRecord> },
-    void,
-    void,
-    "log/console"
-> {
-    return definePlugin({
-        name: "log/console",
-        apply(input, scope) {
-            scope.onDispose(
-                pumpStream(input.records, writeToConsole, (error) => scope.onError(error)),
-            );
         },
     });
 }

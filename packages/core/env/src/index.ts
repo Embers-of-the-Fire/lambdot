@@ -2,13 +2,13 @@ import type { Plugin } from "@lambdot/core";
 import { definePlugin } from "@lambdot/core";
 
 /**
- * Read variables from `process.env` and emit them as the plugin's namespace
- * value: a snapshot of the requested variables, keyed by variable name. A
- * missing or empty variable fails activation loudly at start, so a
- * misconfigured deployment surfaces before any consumer activates.
+ * Read variables from `process.env` and emit them as the plugin's item
+ * map: a snapshot of the requested variables, keyed by variable name. A
+ * missing or empty variable fails the application loudly, so a
+ * misconfigured deployment surfaces before any consumer applies.
  *
  * ```ts
- * createKernel().use(envVars("qq-env", ["QQ_BOT_APP_ID", "QQ_BOT_APP_SECRET"]));
+ * app.with(envVars("qq-env", ["QQ_BOT_APP_ID", "QQ_BOT_APP_SECRET"]));
  * // ctx["qq-env"].QQ_BOT_APP_ID: string
  * ```
  */

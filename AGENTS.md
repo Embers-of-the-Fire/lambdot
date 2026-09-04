@@ -21,6 +21,7 @@ After any change, run the formatter and the linter:
 | -------------- | -------------------------------------------------------------------- |
 | `nub run fmt`  | format with oxfmt (`fmt:check` to verify)                            |
 | `nub run lint` | lint with oxlint — type-aware, subsumes `tsc --noEmit` (`typeCheck`) |
+| `nub run test` | run every package's `node --test` suite (tests live next to `src/`)  |
 
 oxlint is the only typechecker. Do not add `tsc` invocations anywhere;
 `typescript` is a devDependency only to support oxlint's type-aware linting.
@@ -41,7 +42,7 @@ Releases are driven by [Changesets](https://changesets.dev) (`.changeset/`,
   PR is merged, publishes to npm via OIDC trusted publishing (no npm tokens).
 - Tags and GitHub releases use the `@lambdot/core@0.2.0` format. (Old
   `core-v0.1.0`-style tags from the release-please era remain as history.)
-- All nine `@lambdot/*` packages are in one `linked` group: they share the
+- All eleven `@lambdot/*` packages are in one `linked` group: they share the
   highest current version and highest bump type, but only packages with
   changesets — or that depend on a bumped package — are versioned and
   published. Everything depends on `@lambdot/core`, so a core change

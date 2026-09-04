@@ -13,6 +13,9 @@
     "publishConfig": {
         "access": "public"
     },
+    "scripts": {
+        "test": "node --test"
+    },
     "dependencies": {
         "@lambdot/core": "workspace:*"
     }

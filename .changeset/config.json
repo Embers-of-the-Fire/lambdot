@@ -8,6 +8,8 @@
             "@lambdot/core",
             "@lambdot/env",
             "@lambdot/host-cloudflare",
+            "@lambdot/host-hono",
+            "@lambdot/http",
             "@lambdot/logging",
             "@lambdot/protocol-qq",
             "@lambdot/state-memory",

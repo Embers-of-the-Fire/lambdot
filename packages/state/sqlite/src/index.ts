@@ -13,16 +13,15 @@ export interface SqliteDatabaseConfig {
 
 /**
  * Open a SQLite database (via `node:sqlite`, no native dependencies) and
- * emit the connection as the plugin's namespace value. Instances multiply by
+ * emit the connection as the plugin's item map. Instances multiply by
  * name — compose `sqliteDatabase("db")` and `sqliteDatabase("cache")` side
  * by side and each consumer wires its own through its mapping. Unlike a
  * Cloudflare binding the connection is owned by the plugin: it opens at
- * activation and closes when the composition stops.
+ * application time and closes when the owning scope disposes.
  *
  * ```ts
- * createKernel()
- *     .use(sqliteDatabase("db"), { option: { path: "bot.db" } })
- *     .use(myFeature, { mapping: (ctx) => ({ db: ctx.db }) });
+ * app.with(sqliteDatabase("db"), { option: { path: "bot.db" } })
+ *    .use(myFeature, { mapping: (ctx) => ({ db: ctx.db }) });
  * ```
  */
 export function sqliteDatabase<const TCap extends string>(

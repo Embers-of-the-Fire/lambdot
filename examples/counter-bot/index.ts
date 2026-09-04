@@ -1,31 +1,29 @@
-import { consolePlatform, type ConsoleLine } from "@lambdot/console";
-import type { StateBackend, Stream } from "@lambdot/core";
-import { createKernel, createStateAccessor, definePlugin, mapStream } from "@lambdot/core";
+import { consoleIo, type ConsoleIo } from "@lambdot/console";
+import { createScope, definePlugin } from "@lambdot/core";
 import { memoryState } from "@lambdot/state-memory";
-
-interface CounterSchema {
-    count: number;
-}
 
 const counter = definePlugin({
     name: "counter",
-    apply(input: { "console/lines": Stream<ConsoleLine>; state: StateBackend }) {
-        const state = createStateAccessor<CounterSchema>(input.state, "counter");
-        return mapStream(input["console/lines"], async (event) => {
-            const count = ((await state.get("count")) ?? 0) + 1;
-            await state.set("count", count);
-            return { address: event.address, content: `#${count}: ${event.payload}` };
-        });
+    apply(input: { console: ConsoleIo; state: Map<string, unknown> }, scope) {
+        scope.onDispose(
+            input.console.onLine((line) => {
+                const count = ((input.state.get("count") as number | undefined) ?? 0) + 1;
+                input.state.set("count", count);
+                input.console.print(`#${count}: ${line}`);
+            }),
+        );
     },
 });
 
-const cli = consolePlatform();
-
-const kernel = createKernel()
-    .use(cli.lines)
-    .use(memoryState())
+const app = definePlugin({ name: "app", apply: () => ({}) })
+    .with(consoleIo(), { option: {} })
+    .with(memoryState())
     // identity wiring: counter's inputs match the visible ctx
-    .use(counter)
-    .bind(cli.printer, { mapping: (ctx) => ({ replies: ctx.counter }) });
+    .use(counter);
 
-await kernel.start();
+const scope = createScope();
+await app.apply({}, scope, undefined);
+
+process.on("SIGINT", () => {
+    void scope.dispose().then(() => process.exit(0));
+});
