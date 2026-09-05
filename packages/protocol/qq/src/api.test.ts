@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createQqApi, type QqMessageContext } from "./api.ts";
+import { createQqApi, type QqFileUpload, type QqMessageContext } from "./api.ts";
 
 interface RecordedRequest {
     url: string;
@@ -284,6 +284,24 @@ void test("uploads post the file and return its file_info", async () => {
                 upload_id: "task-1",
                 file_name: "a.zip",
             });
+        },
+    );
+});
+
+void test("uploads reject a file with no source", async () => {
+    await withFetch(
+        () => tokenResponse(),
+        async (recorded) => {
+            const api = okApi();
+            await assert.rejects(
+                api.uploadC2cFile("u1", { fileType: 1 } as QqFileUpload),
+                /requires a source/,
+            );
+            await assert.rejects(
+                api.uploadGroupFile("g1", { fileType: 4 } as QqFileUpload),
+                /requires a source/,
+            );
+            assert.equal(recorded.filter((r) => r.url.includes("/files")).length, 0);
         },
     );
 });

@@ -143,14 +143,30 @@ export interface QqSentMessage {
     readonly refIdx?: string | undefined;
 }
 
-/** A rich-media upload; C2C and group uploads are not interchangeable. */
-export interface QqFileUpload {
+/**
+ * A rich-media upload; C2C and group uploads are not interchangeable. The
+ * platform requires an upload source: either a public `url` it downloads and
+ * re-hosts, or the `uploadId` of a chunked-upload task from `upload_prepare`
+ * (the merge path). The union enforces this at the type level; source-less
+ * objects are also rejected at runtime.
+ */
+export type QqFileUpload = QqFileUploadBase &
+    (
+        | {
+              /** Public URL the platform downloads and re-hosts. */
+              readonly url: string;
+              readonly uploadId?: never;
+          }
+        | {
+              /** Chunked-upload task id from `upload_prepare`; takes the merge path. */
+              readonly uploadId: string;
+              readonly url?: never;
+          }
+    );
+
+interface QqFileUploadBase {
     /** 1 image (png/jpg), 2 video (mp4), 3 voice (silk), 4 file. */
     readonly fileType: 1 | 2 | 3 | 4;
-    /** Public URL the platform downloads and re-hosts; omit when merging a chunked upload. */
-    readonly url?: string | undefined;
-    /** Chunked-upload task id from `upload_prepare`; takes the merge path, `url` may be empty. */
-    readonly uploadId?: string | undefined;
     readonly fileName?: string | undefined;
     /** Send the message immediately on upload, consuming an active-message quota. */
     readonly srvSendMsg?: boolean | undefined;
@@ -323,6 +339,8 @@ export function createQqApi(
         openid: string,
         file: QqFileUpload,
     ): Promise<QqUploadedFile> => {
+        if (file.url === undefined && file.uploadId === undefined)
+            throw new Error("qq file upload requires a source: url or uploadId");
         const path = scene === "group" ? `/v2/groups/${openid}/files` : `/v2/users/${openid}/files`;
         const res = await authed(path, {
             method: "POST",
