@@ -1,9 +1,45 @@
-export { createQqApi, qqApi, type QqApi, type QqApiConfig } from "./api.ts";
+export {
+    createQqApi,
+    qqApi,
+    type QqApi,
+    type QqApiConfig,
+    type QqFileUpload,
+    type QqKeyboard,
+    type QqKeyboardButton,
+    type QqKeyboardButtonAction,
+    type QqKeyboardButtonModal,
+    type QqKeyboardButtonPermission,
+    type QqKeyboardButtonRenderData,
+    type QqKeyboardRow,
+    type QqMarkdown,
+    type QqMessageContext,
+    type QqOutgoingMessage,
+    type QqSentMessage,
+    type QqUploadedFile,
+} from "./api.ts";
 export {
     DEFAULT_QQ_CREDENTIAL_KEYS,
     readQqCredentials,
     type QqCredentialKeys,
     type QqCredentials,
 } from "./credentials.ts";
-export { decodeMessageEvent, type QqAddress, type QqMessage } from "./events.ts";
-export { qqWebhook, type QqMessageEvent, type QqWebhook, type QqWebhookConfig } from "./webhook.ts";
+export {
+    decodeQqEvent,
+    type QqC2cMessageEvent,
+    type QqC2cMsgGateEvent,
+    type QqDispatchFrame,
+    type QqEvent,
+    type QqEventUser,
+    type QqFriendAddEvent,
+    type QqFriendDelEvent,
+    type QqGroupJoinRequestEvent,
+    type QqGroupMemberEvent,
+    type QqGroupMessageEvent,
+    type QqGroupMsgGateEvent,
+    type QqGroupRobotEvent,
+    type QqIncomingMessage,
+    type QqInteractionEvent,
+    type QqMessageAttachment,
+    type QqMessageScene,
+} from "./events.ts";
+export { qqWebhook, type QqWebhook, type QqWebhookConfig } from "./webhook.ts";

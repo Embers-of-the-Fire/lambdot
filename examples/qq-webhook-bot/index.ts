@@ -2,7 +2,7 @@ import { serve } from "@hono/node-server";
 import { createScope, definePlugin } from "@lambdot/core";
 import { envVars } from "@lambdot/env";
 import { httpHono } from "@lambdot/host-hono";
-import { qqWebhook, type QqWebhook } from "@lambdot/protocol-qq";
+import { qqApi, qqWebhook, type QqApi, type QqWebhook } from "@lambdot/protocol-qq";
 import { Hono } from "hono";
 
 import { startFakeQqPlatform } from "./platform.ts";
@@ -15,9 +15,24 @@ process.env.QQ_BOT_APP_SECRET ??= "fake-bot-secret-fake-bot-se";
 
 const reply = definePlugin({
     name: "reply",
-    apply(input: { qq: QqWebhook }, scope) {
+    apply(input: { qq: QqWebhook; api: QqApi }, scope) {
         scope.onDispose(
-            input.qq.onMessage((event) => void event.reply(`echo: ${event.message.content}`)),
+            input.qq.onEvent((event) => {
+                // The webhook only listens; replying goes through the REST
+                // client with the context the event carries.
+                if (event.type === "C2C_MESSAGE_CREATE")
+                    void input.api.sendC2cMessage(
+                        event.userOpenid,
+                        { msgType: 0, content: `echo: ${event.message.content.trim()}` },
+                        event.context,
+                    );
+                if (event.type === "GROUP_AT_MESSAGE_CREATE")
+                    void input.api.sendGroupMessage(
+                        event.groupOpenid,
+                        { msgType: 0, content: `echo: ${event.message.content.trim()}` },
+                        event.context,
+                    );
+            }),
         );
     },
 });
@@ -32,10 +47,14 @@ const app = definePlugin({ name: "app", apply: () => ({}) })
     .with(envVars("qq-env", ["QQ_BOT_APP_ID", "QQ_BOT_APP_SECRET"]))
     .with(httpHono, { option: { hono } })
     .use(qqWebhook("qq"), {
-        option: { apiBase: platform.apiBase },
+        option: {},
         mapping: (ctx) => ({ http: ctx.http, env: ctx["qq-env"] }),
     })
-    // identity wiring: reply's input key matches the visible ctx
+    .use(qqApi("api"), {
+        option: { apiBase: platform.apiBase },
+        mapping: (ctx) => ({ env: ctx["qq-env"] }),
+    })
+    // identity wiring: reply's input keys match the visible ctx
     .use(reply);
 
 const scope = createScope();

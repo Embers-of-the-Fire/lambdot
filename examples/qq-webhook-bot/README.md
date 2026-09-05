@@ -8,7 +8,7 @@ app in through `@lambdot/host-hono`.
 
 ```console
 $ nub run -F @lambdot-example/qq-webhook-bot start
-platform recorded: {"scope":"group","openid":"GROUP_FAKE_OPENID","content":"echo: hello from qq","msgId":"ROBOT1.0_inbound_1","msgSeq":1}
+platform recorded: {"scope":"group","openid":"GROUP_FAKE_OPENID","content":"echo: hello from qq","msgId":"ROBOT1.0_inbound_1"}
 qq-webhook-bot: OK
 ```
 
@@ -39,12 +39,13 @@ are fakes that match the secret the fake platform signs with.
     The same composition drops into any other HTTP host unchanged — swap
     the server behind the contract, nothing else.
 
-2. **Receiving and replying are one subscription.** The webhook's item map
-   is `{ onMessage(listener): Disposer }`; each delivered event carries the
-   decoded message plus its own `reply(content)` — a passive reply to the
-   conversation the message arrived from (`msg_id` + auto-incremented
-   `msg_seq` over the REST client). There is no output plugin and no
-   command stream: the reply channel travels with the event.
+2. **Listening and replying are separate, context-bound halves.** The
+   webhook's item map is `{ onEvent(listener): Disposer }` — a pure event
+   listener with no REST client inside. Each decoded event carries its own
+   reply `context` (`{ msgId }` for message events, `{ eventId }` for
+   interaction/lifecycle events), and replying is a `qqApi` send with that
+   context provided: the passive-reply reference is resolved from the
+   context the caller hands over, never from state bound into the client.
 
 3. **Signature verification is exercised end-to-end.** The callback
    algorithm is real protocol code: op-13 callback-address validation (sign
@@ -68,8 +69,8 @@ are fakes that match the secret the fake platform signs with.
    asserts that the webhook — which declares required input — cannot be
    `with`-ed, that `mapping` is required when the visible context lacks
    `http`/`env`, that `option` is required even with a mapping (pass `{}`
-   for defaults), and that `reply` identity-wires only once the `qq`
-   namespace exists. Every `@ts-expect-error` line there is a genuine
+   for defaults), and that `reply` identity-wires only once the `qq` and
+   `api` namespaces exist. Every `@ts-expect-error` line there is a genuine
    error — if one stops erroring, the types regressed; fix the types, not
    the test.
 
@@ -80,19 +81,24 @@ const app = definePlugin({ name: "app", apply: () => ({}) })
     .with(envVars("qq-env", ["QQ_BOT_APP_ID", "QQ_BOT_APP_SECRET"]))
     .with(httpHono, { option: { hono } })
     .use(qqWebhook("qq"), {
-        option: { apiBase: platform.apiBase },
+        option: {},
         mapping: (ctx) => ({ http: ctx.http, env: ctx["qq-env"] }),
     })
-    // identity wiring: reply's input key matches the visible ctx
+    .use(qqApi("api"), {
+        option: { apiBase: platform.apiBase },
+        mapping: (ctx) => ({ env: ctx["qq-env"] }),
+    })
+    // identity wiring: reply's input keys match the visible ctx
     .use(reply);
 ```
 
 Env and server are hermetic (`with`): snapshots and bindings depend on
-nothing around them. The webhook is `use`d with a mapping that reshapes
-the accumulated namespaces into its declared input. The example then runs
-its three self-checks in order — op-13 callback validation, the signed echo
-round trip (platform → hono → webhook → reply → REST mock), and the
-tampered-signature refusal — before disposing the scope.
+nothing around them. The webhook and the REST client are `use`d with
+mappings that reshape the accumulated namespaces into their declared
+inputs. The example then runs its three self-checks in order — op-13
+callback validation, the signed echo round trip (platform → hono → webhook
+→ reply → REST mock), and the tampered-signature refusal — before disposing
+the scope.
 
 ## File layout
 
