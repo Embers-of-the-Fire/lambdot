@@ -232,13 +232,18 @@ export interface QqApi {
 }
 
 export interface QqApiConfig {
-    /** Open-platform base URL; override to point at a mock in tests. */
+    /** Open-platform base URL; override to point at a mock in tests (also used for token calls). */
     readonly apiBase?: string | undefined;
     /** Which env variables carry the credentials. */
     readonly keys?: QqCredentialKeys | undefined;
 }
 
 const DEFAULT_API_BASE = "https://api.bot.qq.com";
+/**
+ * Token acquisition goes to a different host than the OpenAPI endpoints;
+ * Tencent requires `bots.qq.com` for `/app/getAppAccessToken`.
+ */
+const DEFAULT_TOKEN_BASE = "https://bots.qq.com";
 /** Refresh a token once it is within this margin of its expiry. */
 const EXPIRY_MARGIN_MS = 60_000;
 
@@ -248,12 +253,15 @@ export function createQqApi(
     options?: { apiBase?: string | undefined },
 ): QqApi {
     const apiBase = options?.apiBase ?? DEFAULT_API_BASE;
+    // An apiBase override (e.g. a mock in tests) serves both API and token
+    // calls; only the defaults differ.
+    const tokenBase = options?.apiBase ?? DEFAULT_TOKEN_BASE;
 
     let cached: { token: string; expiresAt: number } | undefined;
     let pending: Promise<string> | undefined;
     const accessToken = (): Promise<string> => {
         if (cached && Date.now() < cached.expiresAt) return Promise.resolve(cached.token);
-        pending ??= fetch(`${apiBase}/app/getAppAccessToken`, {
+        pending ??= fetch(`${tokenBase}/app/getAppAccessToken`, {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({
