@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0
+
+### Minor Changes
+
+- [#16](https://github.com/Embers-of-the-Fire/lambdot/pull/16) [`b874a1e`](https://github.com/Embers-of-the-Fire/lambdot/commit/b874a1e9251cffec3111a2a703cfc5d9cc47fd75) Thanks [@Embers-of-the-Fire](https://github.com/Embers-of-the-Fire)! - Make `QqFileUpload` a union requiring an upload source: either `url` or
+  `uploadId` must be present (`{ fileType: 1 }` alone no longer type-checks),
+  and uploads reject a source-less object at runtime instead of sending a
+  request the platform is guaranteed to refuse.
+
 ## 0.3.0
 
 ### Minor Changes

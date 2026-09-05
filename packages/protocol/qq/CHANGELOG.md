@@ -1,5 +1,53 @@
 # Changelog
 
+## 0.4.0
+
+### Minor Changes
+
+- [#16](https://github.com/Embers-of-the-Fire/lambdot/pull/16) [`b874a1e`](https://github.com/Embers-of-the-Fire/lambdot/commit/b874a1e9251cffec3111a2a703cfc5d9cc47fd75) Thanks [@Embers-of-the-Fire](https://github.com/Embers-of-the-Fire)! - Replace the message-bound QQ protocol with the full C2C/group infra, per the
+  official documentation. **Breaking**: `QqAddress`, `QqMessageEvent.reply`,
+  `decodeMessageEvent`, and the client's auto-incremented `msg_seq` state are
+  gone. The webhook is now a pure listener (`onEvent`) decoding every C2C/group
+  dispatch — message events (`C2C_MESSAGE_CREATE`, `GROUP_AT_MESSAGE_CREATE`,
+  and full-mode `GROUP_MESSAGE_CREATE`, with author/attachments/mentions/scene),
+  `INTERACTION_CREATE`, friend and group lifecycle/gate events, and group
+  member/join-request events; guild-scene dispatches are dropped. Sending
+  resolves from a caller-provided `QqMessageContext` (`{ msgId, msgSeq? }`,
+  `{ eventId }`, `{ wakeup: true }`, or active) via
+  `sendC2cMessage`/`sendGroupMessage`, which cover text/markdown/input-notify/
+  rich-media payloads with keyboards and quote references and return the sent
+  message's id. The client also gains `recallC2cMessage`/`recallGroupMessage`,
+  `uploadC2cFile`/`uploadGroupFile`, and `ackInteraction`.
+
+- [#16](https://github.com/Embers-of-the-Fire/lambdot/pull/16) [`b874a1e`](https://github.com/Embers-of-the-Fire/lambdot/commit/b874a1e9251cffec3111a2a703cfc5d9cc47fd75) Thanks [@Embers-of-the-Fire](https://github.com/Embers-of-the-Fire)! - Make `QqFileUpload` a union requiring an upload source: either `url` or
+  `uploadId` must be present (`{ fileType: 1 }` alone no longer type-checks),
+  and uploads reject a source-less object at runtime instead of sending a
+  request the platform is guaranteed to refuse.
+
+### Patch Changes
+
+- [#16](https://github.com/Embers-of-the-Fire/lambdot/pull/16) [`b874a1e`](https://github.com/Embers-of-the-Fire/lambdot/commit/b874a1e9251cffec3111a2a703cfc5d9cc47fd75) Thanks [@Embers-of-the-Fire](https://github.com/Embers-of-the-Fire)! - Reject a `QqMessageContext` with no addressing mode at runtime: an empty
+  context and a lone `msgSeq` (without `msgId`) now throw instead of falling
+  through to `is_wakeup: true`, keeping runtime behavior consistent with the
+  type-level contract.
+
+- [#16](https://github.com/Embers-of-the-Fire/lambdot/pull/16) [`b874a1e`](https://github.com/Embers-of-the-Fire/lambdot/commit/b874a1e9251cffec3111a2a703cfc5d9cc47fd75) Thanks [@Embers-of-the-Fire](https://github.com/Embers-of-the-Fire)! - Make `QqMessageContext` an exclusive union: the `msgId`, `eventId`, and
+  `wakeup` variants now exclude each other's fields at the type level
+  (`?: never`), and sends reject a context carrying conflicting fields at
+  runtime instead of silently dropping them.
+
+- [#16](https://github.com/Embers-of-the-Fire/lambdot/pull/16) [`b874a1e`](https://github.com/Embers-of-the-Fire/lambdot/commit/b874a1e9251cffec3111a2a703cfc5d9cc47fd75) Thanks [@Embers-of-the-Fire](https://github.com/Embers-of-the-Fire)! - Send `/app/getAppAccessToken` to `https://bots.qq.com`, the host Tencent
+  requires for token acquisition, instead of the OpenAPI host. The `apiBase`
+  override still serves both API and token calls, so pointing at a mock in
+  tests keeps working.
+
+- [#16](https://github.com/Embers-of-the-Fire/lambdot/pull/16) [`b874a1e`](https://github.com/Embers-of-the-Fire/lambdot/commit/b874a1e9251cffec3111a2a703cfc5d9cc47fd75) Thanks [@Embers-of-the-Fire](https://github.com/Embers-of-the-Fire)! - Reject `QqFileUpload` objects that carry both `url` and `uploadId` at runtime,
+  matching the exclusive-source contract of the type. Previously a JavaScript
+  caller or type cast could smuggle both fields into the upload request.
+- Updated dependencies [[`b874a1e`](https://github.com/Embers-of-the-Fire/lambdot/commit/b874a1e9251cffec3111a2a703cfc5d9cc47fd75)]:
+  - @lambdot/core@0.4.0
+  - @lambdot/http@0.4.0
+
 ## 0.3.0
 
 ### Minor Changes
