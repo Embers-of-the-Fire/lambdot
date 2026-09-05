@@ -26,7 +26,11 @@ into the client:
 ```ts
 input.qq.onEvent((event) => {
     if (event.type === "GROUP_AT_MESSAGE_CREATE")
-        void api.sendGroupMessage(event.groupOpenid, { msgType: 0, content: "hi" }, event.context);
+        void input.api.sendGroupMessage(
+            event.groupOpenid,
+            { msgType: 0, content: "hi" },
+            event.context,
+        );
 });
 ```
 
