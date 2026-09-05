@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createQqApi } from "./api.ts";
+import { createQqApi, type QqMessageContext } from "./api.ts";
 
 interface RecordedRequest {
     url: string;
@@ -195,6 +195,30 @@ void test("sends encode markdown, media, input_notify, keyboards, and references
                 input_notify: { input_type: 1, input_second: 30 },
                 msg_id: "m2",
             });
+        },
+    );
+});
+
+void test("sends reject a context with conflicting fields", async () => {
+    await withFetch(
+        () => tokenResponse(),
+        async (recorded) => {
+            const api = okApi();
+            await assert.rejects(
+                api.sendC2cMessage("u1", { msgType: 0, content: "hi" }, {
+                    msgId: "m1",
+                    eventId: "e1",
+                } as unknown as QqMessageContext),
+                /mutually exclusive/,
+            );
+            await assert.rejects(
+                api.sendGroupMessage("g1", { msgType: 0, content: "hi" }, {
+                    msgId: "m1",
+                    wakeup: true,
+                } as unknown as QqMessageContext),
+                /mutually exclusive/,
+            );
+            assert.equal(recorded.filter((r) => r.url.includes("/messages")).length, 0);
         },
     );
 });

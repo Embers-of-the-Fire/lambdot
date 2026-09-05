@@ -10,7 +10,8 @@ import { readQqCredentials, type QqCredentialKeys, type QqCredentials } from "./
  * (a message event's `d.id`) or an `eventId` (the dispatch's outer `id`,
  * supported by `INTERACTION_CREATE`, `FRIEND_ADD`, `C2C_MSG_RECEIVE`,
  * `GROUP_ADD_ROBOT`, `GROUP_MSG_RECEIVE`), and an interaction-recall message
- * (`wakeup`) excludes both. Omitting the context sends an active message.
+ * (`wakeup`) excludes both. Conflicting fields are also rejected at runtime.
+ * Omitting the context sends an active message.
  */
 export type QqMessageContext =
     | {
@@ -18,14 +19,22 @@ export type QqMessageContext =
           readonly msgId: string;
           /** `msg_seq`; defaults to 1 on the platform. Repeating a `msg_id + msg_seq` pair fails. */
           readonly msgSeq?: number | undefined;
+          readonly eventId?: never;
+          readonly wakeup?: never;
       }
     | {
           /** Passive reply to an event (`event_id`). */
           readonly eventId: string;
+          readonly msgId?: never;
+          readonly msgSeq?: never;
+          readonly wakeup?: never;
       }
     | {
           /** Interaction-recall message (`is_wakeup`), for re-engaging a user within a cycle. */
           readonly wakeup: true;
+          readonly msgId?: never;
+          readonly msgSeq?: never;
+          readonly eventId?: never;
       };
 
 /** Markdown payload (`msg_type` 2). */
@@ -403,10 +412,17 @@ function encodeMessage(
     if ("reference" in message && message.reference !== undefined)
         body.message_reference = { message_id: message.reference };
     if (context !== undefined) {
-        if ("msgId" in context) {
+        const fields = (["msgId", "eventId", "wakeup"] as const).filter(
+            (key) => context[key] !== undefined,
+        );
+        if (fields.length > 1)
+            throw new Error(
+                `qq message context fields are mutually exclusive, got: ${fields.join(", ")}`,
+            );
+        if (context.msgId !== undefined) {
             body.msg_id = context.msgId;
             if (context.msgSeq !== undefined) body.msg_seq = context.msgSeq;
-        } else if ("eventId" in context) {
+        } else if (context.eventId !== undefined) {
             body.event_id = context.eventId;
         } else {
             body.is_wakeup = true;
