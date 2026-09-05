@@ -349,6 +349,8 @@ export function createQqApi(
     ): Promise<QqUploadedFile> => {
         if (file.url === undefined && file.uploadId === undefined)
             throw new Error("qq file upload requires a source: url or uploadId");
+        if (file.url !== undefined && file.uploadId !== undefined)
+            throw new Error("qq file upload accepts only one source: url or uploadId, not both");
         const path = scene === "group" ? `/v2/groups/${openid}/files` : `/v2/users/${openid}/files`;
         const res = await authed(path, {
             method: "POST",

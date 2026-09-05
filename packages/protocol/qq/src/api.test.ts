@@ -306,6 +306,32 @@ void test("uploads reject a file with no source", async () => {
     );
 });
 
+void test("uploads reject a file with both sources", async () => {
+    await withFetch(
+        () => tokenResponse(),
+        async (recorded) => {
+            const api = okApi();
+            await assert.rejects(
+                api.uploadC2cFile("u1", {
+                    fileType: 1,
+                    url: "https://example.com/a.png",
+                    uploadId: "task-1",
+                } as QqFileUpload),
+                /only one source/,
+            );
+            await assert.rejects(
+                api.uploadGroupFile("g1", {
+                    fileType: 4,
+                    url: "https://example.com/a.zip",
+                    uploadId: "task-2",
+                } as QqFileUpload),
+                /only one source/,
+            );
+            assert.equal(recorded.filter((r) => r.url.includes("/files")).length, 0);
+        },
+    );
+});
+
 void test("ackInteraction puts the result code", async () => {
     await withFetch(
         (request) => {
