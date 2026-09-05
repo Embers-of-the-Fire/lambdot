@@ -3,6 +3,7 @@ export {
     qqApi,
     type QqApi,
     type QqApiConfig,
+    type QqApiOptions,
     type QqFileUpload,
     type QqKeyboard,
     type QqKeyboardButton,
@@ -42,4 +43,5 @@ export {
     type QqMessageAttachment,
     type QqMessageScene,
 } from "./events.ts";
+export type { QqToken, QqTokenStore } from "./token.ts";
 export { qqWebhook, type QqWebhook, type QqWebhookConfig } from "./webhook.ts";

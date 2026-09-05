@@ -2,6 +2,7 @@ import type { Plugin } from "@lambdot/core";
 import { definePlugin } from "@lambdot/core";
 
 import { readQqCredentials, type QqCredentialKeys, type QqCredentials } from "./credentials.ts";
+import type { QqToken, QqTokenStore } from "./token.ts";
 
 /**
  * The reply context of a send, provided by the caller — usually taken from a
@@ -187,9 +188,10 @@ export interface QqUploadedFile {
 /**
  * The REST half of the qq protocol: every send is an authenticated HTTPS call
  * against the open platform. Owns the access-token lifecycle: tokens are
- * cached and refreshed ahead of expiry (the platform hands out ~7200s tokens
- * and keeps the old one valid for a 60s overlap). Sends resolve their
- * passive/active nature from the caller-provided {@link QqMessageContext} —
+ * cached in the wired-in {@link QqTokenStore} (a private in-memory cache when
+ * none is given) and refreshed ahead of expiry (the platform hands out
+ * ~7200s tokens and keeps the old one valid for a 60s overlap). Sends resolve
+ * their passive/active nature from the caller-provided {@link QqMessageContext} —
  * the client holds no per-message reply state.
  */
 export interface QqApi {
@@ -248,20 +250,41 @@ const DEFAULT_TOKEN_BASE = "https://bots.qq.com";
 /** Refresh a token once it is within this margin of its expiry. */
 const EXPIRY_MARGIN_MS = 60_000;
 
+/** Options for {@link createQqApi}. */
+export interface QqApiOptions {
+    /** Open-platform base URL; override to point at a mock in tests (also used for token calls). */
+    readonly apiBase?: string | undefined;
+    /**
+     * Where the access token is kept between fetches; defaults to a private
+     * in-memory cache. Wire one in to share the token across client
+     * instances or persist it across restarts.
+     */
+    readonly tokenStore?: QqTokenStore | undefined;
+}
+
+/** The fallback token store: a single process-memory slot per client. */
+function inMemoryTokenStore(): QqTokenStore {
+    let cached: QqToken | undefined;
+    return {
+        get: () => cached,
+        set: (token) => {
+            cached = token;
+        },
+    };
+}
+
 /** Build the REST client directly, outside a composition. */
-export function createQqApi(
-    credentials: QqCredentials,
-    options?: { apiBase?: string | undefined },
-): QqApi {
+export function createQqApi(credentials: QqCredentials, options?: QqApiOptions): QqApi {
     const apiBase = options?.apiBase ?? DEFAULT_API_BASE;
     // An apiBase override (e.g. a mock in tests) serves both API and token
     // calls; only the defaults differ.
     const tokenBase = options?.apiBase ?? DEFAULT_TOKEN_BASE;
+    const tokenStore = options?.tokenStore ?? inMemoryTokenStore();
 
-    let cached: { token: string; expiresAt: number } | undefined;
     let pending: Promise<string> | undefined;
-    const accessToken = (): Promise<string> => {
-        if (cached && Date.now() < cached.expiresAt) return Promise.resolve(cached.token);
+    const accessToken = async (): Promise<string> => {
+        const cached = await tokenStore.get();
+        if (cached !== undefined && Date.now() < cached.expiresAt) return cached.token;
         pending ??= fetch(`${tokenBase}/app/getAppAccessToken`, {
             method: "POST",
             headers: { "content-type": "application/json" },
@@ -291,8 +314,8 @@ export function createQqApi(
                 };
             })
             .then(
-                (next) => {
-                    cached = next;
+                async (next) => {
+                    await tokenStore.set(next);
                     pending = undefined;
                     return next.token;
                 },
@@ -540,21 +563,45 @@ function encodeKeyboard(keyboard: QqKeyboard): Record<string, unknown> {
 
 /**
  * The qq REST client as a plugin, reading credentials from an env snapshot
- * (see `@lambdot/env`). Wire the env namespace through the mapping:
+ * (see `@lambdot/env`). Wire the env namespace through the mapping; the
+ * optional `tokenStore` input accepts any {@link QqTokenStore} backend —
+ * e.g. a `@lambdot/state-memory` map adapted to the `get`/`set` pair.
  *
  * ```ts
  * app.use(envVars("qq-env", ["QQ_BOT_APP_ID", "QQ_BOT_APP_SECRET"]))
- *    .use(qqApi("qq-api"), { option: {}, mapping: (ctx) => ({ env: ctx["qq-env"] }) });
+ *    .use(memoryState())
+ *    .use(qqApi("qq-api"), {
+ *        option: {},
+ *        mapping: (ctx) => ({
+ *            env: ctx["qq-env"],
+ *            tokenStore: {
+ *                get: () => ctx.state.get("qq-token") as QqToken | undefined,
+ *                set: (token) => void ctx.state.set("qq-token", token),
+ *            },
+ *        }),
+ *    });
  * ```
  */
 export function qqApi<const TName extends string>(
     name: TName,
-): Plugin<{ env: Readonly<Record<string, string>> }, QqApi, QqApiConfig, TName> {
+): Plugin<
+    {
+        env: Readonly<Record<string, string>>;
+        /** Optional token store; absent means the client's private in-memory cache. */
+        tokenStore?: QqTokenStore | undefined;
+    },
+    QqApi,
+    QqApiConfig,
+    TName
+> {
     return definePlugin({
         name,
         apply(input, _scope, config) {
             const credentials = readQqCredentials(input.env, config.keys);
-            return createQqApi(credentials, config);
+            return createQqApi(credentials, {
+                apiBase: config.apiBase,
+                tokenStore: input.tokenStore,
+            });
         },
     });
 }

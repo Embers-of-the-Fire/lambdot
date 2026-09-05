@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createQqApi, type QqFileUpload, type QqMessageContext } from "./api.ts";
+import { createScope } from "@lambdot/core";
+import { memoryState } from "@lambdot/state-memory";
+
+import { createQqApi, qqApi, type QqFileUpload, type QqMessageContext } from "./api.ts";
+import type { QqToken, QqTokenStore } from "./token.ts";
 
 interface RecordedRequest {
     url: string;
@@ -61,6 +65,96 @@ void test("qq api caches the access token and authorizes requests", async () => 
             });
             const gateway = recorded.find((r) => r.url.endsWith("/gateway"));
             assert.equal(gateway!.authorization, "QQBot token-1");
+        },
+    );
+});
+
+/** Adapt a `memoryState` map to the QqTokenStore pair. */
+async function mapTokenStore(): Promise<{ store: QqTokenStore; dispose: () => Promise<void> }> {
+    const scope = createScope();
+    const state = await memoryState().apply(undefined, scope, undefined);
+    return {
+        store: {
+            get: () => state.get("qq-token") as QqToken | undefined,
+            set: (token) => {
+                state.set("qq-token", token);
+            },
+        },
+        dispose: () => scope.dispose(),
+    };
+}
+
+void test("a wired-in token store shares one token fetch across clients", async () => {
+    await withFetch(
+        (request) => {
+            if (request.url.endsWith("/app/getAppAccessToken")) return tokenResponse();
+            return Response.json({ url: "wss://gateway.example" });
+        },
+        async (recorded) => {
+            const { store, dispose } = await mapTokenStore();
+            const credentials = { appId: "app", clientSecret: "secret" };
+            const options = { apiBase: "https://mock.test", tokenStore: store };
+            const first = createQqApi(credentials, options);
+            const second = createQqApi(credentials, options);
+            assert.equal(await first.accessToken(), "token-1");
+            assert.equal(await second.accessToken(), "token-1");
+            assert.equal(await first.gatewayUrl(), "wss://gateway.example");
+            assert.equal(
+                recorded.filter((r) => r.url.endsWith("/app/getAppAccessToken")).length,
+                1,
+            );
+            await dispose();
+        },
+    );
+});
+
+void test("an expired stored token is refreshed and persisted back", async () => {
+    await withFetch(
+        (request) => {
+            if (request.url.endsWith("/app/getAppAccessToken")) return tokenResponse();
+            return Response.json({});
+        },
+        async (recorded) => {
+            const { store, dispose } = await mapTokenStore();
+            await store.set({ token: "stale", expiresAt: Date.now() - 1 });
+            const api = createQqApi(
+                { appId: "app", clientSecret: "secret" },
+                { apiBase: "https://mock.test", tokenStore: store },
+            );
+            assert.equal(await api.accessToken(), "token-1");
+            assert.equal(
+                recorded.filter((r) => r.url.endsWith("/app/getAppAccessToken")).length,
+                1,
+            );
+            const stored = await store.get();
+            assert.equal(stored!.token, "token-1");
+            assert.ok(stored!.expiresAt > Date.now());
+            await dispose();
+        },
+    );
+});
+
+void test("the plugin takes its token store from the optional input", async () => {
+    await withFetch(
+        (request) => {
+            if (request.url.endsWith("/app/getAppAccessToken")) return tokenResponse();
+            return Response.json({ url: "wss://gateway.example" });
+        },
+        async () => {
+            const { store, dispose } = await mapTokenStore();
+            const scope = createScope();
+            const api = await qqApi("qq-api").apply(
+                {
+                    env: { QQ_BOT_APP_ID: "app", QQ_BOT_APP_SECRET: "secret" },
+                    tokenStore: store,
+                },
+                scope,
+                { apiBase: "https://mock.test" },
+            );
+            assert.equal(await api.accessToken(), "token-1");
+            assert.equal((await store.get())!.token, "token-1");
+            await scope.dispose();
+            await dispose();
         },
     );
 });

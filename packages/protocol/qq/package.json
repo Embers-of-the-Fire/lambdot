@@ -22,6 +22,7 @@
         "tweetnacl": "^1.0.3"
     },
     "devDependencies": {
+        "@lambdot/state-memory": "workspace:*",
         "hono": "^4.13.5"
     }
 }

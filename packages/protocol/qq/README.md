@@ -77,8 +77,29 @@ platform may push the same `msg_id` more than once; deduplicate on
 ## Secure API requests
 
 `QqApi` owns the access-token lifecycle (cached, refreshed ahead of expiry)
-and authorizes every call with `QQBot <token>`. Sends resolve their mode
-from the caller-provided `QqMessageContext`:
+and authorizes every call with `QQBot <token>`. Where the token lives is
+pluggable: the `tokenStore` — a `QqTokenStore`, an async-capable
+`{ get, set }` pair over `{ token, expiresAt }` — defaults to a private
+in-memory cache, and can be wired to any state backend (a
+`@lambdot/state-memory` map, SQLite, a KV namespace) to share one token
+across client instances or survive restarts. `createQqApi` takes it as an
+option; the `qqApi` plugin declares it as an optional input fed through the
+composition mapping:
+
+```ts
+app.use(memoryState()).use(qqApi("api"), {
+    option: {},
+    mapping: (ctx) => ({
+        env: ctx["qq-env"],
+        tokenStore: {
+            get: () => ctx.state.get("qq-token") as QqToken | undefined,
+            set: (token) => void ctx.state.set("qq-token", token),
+        },
+    }),
+});
+```
+
+Sends resolve their mode from the caller-provided `QqMessageContext`:
 
 - `{ msgId, msgSeq? }` — a passive reply to a message (`msg_id`; the
   platform rejects a repeated `msg_id + msg_seq` pair, so callers increment
@@ -159,7 +180,10 @@ the plugin's config type is non-void.
     - `ackInteraction(interactionId, code?)` — answer an `INTERACTION_CREATE`;
       required for button (type 11) and quick-menu (type 12) interactions.
       `createQqApi(credentials, options?)` builds the same client outside a
-      composition.
+      composition; `QqApiOptions` carries `apiBase` and `tokenStore`.
+- `QqToken`, `QqTokenStore` — the token-cache abstraction (`{ get, set }`
+  over `{ token, expiresAt }`), wired as `createQqApi`'s `tokenStore` option
+  or the `qqApi` plugin's optional `tokenStore` input.
 - `QqMessageContext`, `QqOutgoingMessage`, `QqMarkdown`, `QqKeyboard` and
   its button types, `QqFileUpload`, `QqUploadedFile`, `QqSentMessage` — the
   request/response shapes.
