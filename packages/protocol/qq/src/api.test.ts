@@ -223,6 +223,28 @@ void test("sends reject a context with conflicting fields", async () => {
     );
 });
 
+void test("sends reject a context with no addressing mode", async () => {
+    await withFetch(
+        () => tokenResponse(),
+        async (recorded) => {
+            const api = okApi();
+            await assert.rejects(
+                api.sendC2cMessage("u1", { msgType: 0, content: "hi" }, {
+                    // empty context: no msgId/eventId/wakeup
+                } as unknown as QqMessageContext),
+                /requires one of/,
+            );
+            await assert.rejects(
+                api.sendGroupMessage("g1", { msgType: 0, content: "hi" }, {
+                    msgSeq: 2,
+                } as unknown as QqMessageContext),
+                /msgSeq requires msgId/,
+            );
+            assert.equal(recorded.filter((r) => r.url.includes("/messages")).length, 0);
+        },
+    );
+});
+
 void test("group sends reject msg_type 6 (input_notify is c2c-only)", async () => {
     await withFetch(
         () => tokenResponse(),

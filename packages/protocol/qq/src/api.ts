@@ -10,7 +10,8 @@ import { readQqCredentials, type QqCredentialKeys, type QqCredentials } from "./
  * (a message event's `d.id`) or an `eventId` (the dispatch's outer `id`,
  * supported by `INTERACTION_CREATE`, `FRIEND_ADD`, `C2C_MSG_RECEIVE`,
  * `GROUP_ADD_ROBOT`, `GROUP_MSG_RECEIVE`), and an interaction-recall message
- * (`wakeup`) excludes both. Conflicting fields are also rejected at runtime.
+ * (`wakeup`) excludes both. Conflicting fields, a context with no mode, and
+ * a lone `msgSeq` are also rejected at runtime.
  * Omitting the context sends an active message.
  */
 export type QqMessageContext =
@@ -447,6 +448,11 @@ function encodeMessage(
             throw new Error(
                 `qq message context fields are mutually exclusive, got: ${fields.join(", ")}`,
             );
+        if (fields.length === 0) {
+            if (context.msgSeq !== undefined)
+                throw new Error("qq message context msgSeq requires msgId");
+            throw new Error("qq message context requires one of: msgId, eventId, wakeup");
+        }
         if (context.msgId !== undefined) {
             body.msg_id = context.msgId;
             if (context.msgSeq !== undefined) body.msg_seq = context.msgSeq;
